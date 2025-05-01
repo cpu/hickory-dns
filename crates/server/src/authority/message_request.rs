@@ -5,6 +5,8 @@
 // https://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 
+#[cfg(feature = "__dnssec")]
+use crate::proto::rr::RecordType;
 use crate::proto::{
     ProtoError, ProtoErrorKind,
     op::{
@@ -24,6 +26,7 @@ pub struct MessageRequest {
     name_servers: Vec<Record>,
     additionals: Vec<Record>,
     sig0: Vec<Record>,
+    tsig: Vec<Record>,
     edns: Option<Edns>,
 }
 
@@ -155,6 +158,11 @@ impl MessageRequest {
         &self.sig0
     }
 
+    /// Any TSIG records for signed messages
+    pub fn tsig(&self) -> &[Record] {
+        &self.tsig
+    }
+
     /// # Return value
     ///
     /// the max payload value as it's defined in the EDNS section.
@@ -192,7 +200,17 @@ impl<'q> BinDecodable<'q> for MessageRequest {
             let queries = Queries::read(decoder, query_count)?;
             let (answers, _, _) = Message::read_records(decoder, answer_count, false)?;
             let (name_servers, _, _) = Message::read_records(decoder, name_server_count, false)?;
-            let (additionals, edns, sig0) = Message::read_records(decoder, additional_count, true)?;
+            #[cfg_attr(not(feature = "__dnssec"), allow(unused_variables))]
+            let (additionals, edns, sigs) = Message::read_records(decoder, additional_count, true)?;
+
+            // It would be nicer to have Message::read_message() perform this partitioning, but
+            // that would be a breaking change in a pub method.
+            #[cfg(feature = "__dnssec")]
+            let (sig0, tsig): (Vec<Record>, Vec<Record>) = sigs
+                .into_iter()
+                .partition(|rec| rec.record_type() == RecordType::SIG);
+            #[cfg(not(feature = "__dnssec"))]
+            let (sig0, tsig) = (Vec::new(), Vec::new());
 
             // need to grab error code from EDNS (which might have a higher value)
             if let Some(edns) = &edns {
@@ -207,6 +225,7 @@ impl<'q> BinDecodable<'q> for MessageRequest {
                 name_servers,
                 additionals,
                 sig0,
+                tsig,
                 edns,
             })
         };
@@ -327,6 +346,7 @@ impl EmitAndCount for QueriesEmitAndCount<'_> {
 
 impl BinEncodable for MessageRequest {
     fn emit(&self, encoder: &mut BinEncoder<'_>) -> Result<(), ProtoError> {
+        let sigs = [&self.sig0[..], &self.tsig[..]].concat();
         message::emit_message_parts(
             &self.header,
             // we emit the queries, not the raw bytes, in order to guarantee canonical form
@@ -336,7 +356,7 @@ impl BinEncodable for MessageRequest {
             &mut self.name_servers.iter(),
             &mut self.additionals.iter(),
             self.edns.as_ref(),
-            &self.sig0,
+            &sigs,
             encoder,
         )?;
 
@@ -363,6 +383,11 @@ pub trait UpdateRequest {
 
     /// SIG0 records for verifying the Message
     fn sig0(&self) -> &[Record];
+
+    /// TSIG records for verifying the Message
+    fn tsig(&self) -> &[Record] {
+        &[]
+    }
 }
 
 impl UpdateRequest for MessageRequest {
@@ -389,5 +414,9 @@ impl UpdateRequest for MessageRequest {
 
     fn sig0(&self) -> &[Record] {
         self.sig0()
+    }
+
+    fn tsig(&self) -> &[Record] {
+        self.tsig()
     }
 }
