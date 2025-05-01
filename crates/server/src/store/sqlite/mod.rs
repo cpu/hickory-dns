@@ -15,7 +15,7 @@ use std::{
 
 use futures_util::lock::Mutex;
 use serde::Deserialize;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 #[cfg(feature = "metrics")]
 use crate::store::metrics::StoreMetrics;
@@ -487,8 +487,6 @@ impl SqliteAuthority {
     #[cfg(feature = "__dnssec")]
     #[allow(clippy::blocks_in_conditions)]
     pub async fn authorize(&self, update_message: &MessageRequest) -> UpdateResult<()> {
-        use tracing::debug;
-
         // 3.3.3 - Pseudocode for Permission Checking
         //
         //      if (security policy exists)
@@ -508,49 +506,8 @@ impl SqliteAuthority {
         }
 
         // verify sig0, currently the only authorization that is accepted.
-        let sig0s: &[Record] = update_message.sig0();
-        debug!("authorizing with: {:?}", sig0s);
-        if !sig0s.is_empty() {
-            let mut found_key = false;
-            for sig in sig0s
-                .iter()
-                .filter_map(|sig0| sig0.data().as_dnssec().and_then(DNSSECRData::as_sig))
-            {
-                let name = LowerName::from(sig.signer_name());
-                let keys = self
-                    .lookup(&name, RecordType::KEY, LookupOptions::default())
-                    .await;
-
-                let keys = match keys {
-                    Continue(Ok(keys)) => keys,
-                    _ => continue, // error trying to lookup a key by that name, try the next one.
-                };
-
-                debug!("found keys {:?}", keys);
-                // TODO: check key usage flags and restrictions
-                found_key = keys
-                    .iter()
-                    .filter_map(|rr_set| rr_set.data().as_dnssec().and_then(DNSSECRData::as_key))
-                    .any(|key| {
-                        key.verify_message(update_message, sig.sig(), sig)
-                            .map(|_| {
-                                info!("verified sig: {:?} with key: {:?}", sig, key);
-                                true
-                            })
-                            .unwrap_or_else(|_| {
-                                debug!("did not verify sig: {:?} with key: {:?}", sig, key);
-                                false
-                            })
-                    });
-
-                if found_key {
-                    break; // stop searching for matching keys, we found one
-                }
-            }
-
-            if found_key {
-                return Ok(());
-            }
+        if !update_message.sig0().is_empty() {
+            return self.authorized_sig0(update_message).await;
         } else {
             warn!(
                 "no sig0 matched registered records: id {}",
@@ -883,6 +840,49 @@ impl SqliteAuthority {
         }
 
         Ok(updated)
+    }
+
+    #[cfg(feature = "__dnssec")]
+    async fn authorized_sig0(&self, update_message: &MessageRequest) -> UpdateResult<()> {
+        let sig0s = update_message.sig0();
+        debug!("authorizing with: {sig0s:?}");
+        for sig in sig0s
+            .iter()
+            .filter_map(|sig0| sig0.data().as_dnssec().and_then(DNSSECRData::as_sig))
+        {
+            let name = LowerName::from(sig.signer_name());
+            let keys = self
+                .lookup(&name, RecordType::KEY, LookupOptions::default())
+                .await;
+
+            let keys = match keys {
+                Continue(Ok(keys)) => keys,
+                _ => continue, // error trying to lookup a key by that name, try the next one.
+            };
+
+            debug!("found keys {:?}", keys);
+            // TODO: check key usage flags and restrictions
+            let found_key = keys
+                .iter()
+                .filter_map(|rr_set| rr_set.data().as_dnssec().and_then(DNSSECRData::as_key))
+                .any(|key| {
+                    key.verify_message(update_message, sig.sig(), sig)
+                        .map(|_| {
+                            info!("verified sig: {:?} with key: {:?}", sig, key);
+                            true
+                        })
+                        .unwrap_or_else(|_| {
+                            debug!("did not verify sig: {:?} with key: {:?}", sig, key);
+                            false
+                        })
+                });
+
+            if found_key {
+                return Ok(()); // stop searching for matching keys, we found one
+            }
+        }
+
+        Err(ResponseCode::Refused)
     }
 }
 
