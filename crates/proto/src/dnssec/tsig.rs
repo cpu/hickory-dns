@@ -57,17 +57,17 @@ impl TSigner {
         mut signer_name: Name,
         fudge: u16,
     ) -> Result<Self, DnsSecError> {
-        signer_name.set_fqdn(true);
-        if algorithm.supported() {
-            Ok(Self(Arc::new(TSignerInner {
-                key,
-                algorithm,
-                signer_name,
-                fudge,
-            })))
-        } else {
-            Err(DnsSecErrorKind::TsigUnsupportedMacAlgorithm(algorithm).into())
+        if !algorithm.supported() {
+            return Err(DnsSecErrorKind::TsigUnsupportedMacAlgorithm(algorithm).into());
         }
+
+        signer_name.set_fqdn(true);
+        Ok(Self(Arc::new(TSignerInner {
+            key,
+            algorithm,
+            signer_name,
+            fudge,
+        })))
     }
 
     /// Return the key used for message authentication
