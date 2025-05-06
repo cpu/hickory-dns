@@ -639,8 +639,8 @@ pub fn message_tbs<M: BinEncodable>(
 /// * `message` - the byte-message to authenticate, with included TSIG
 /// * `first_message` - whether to emit the tsig pseudo-record for a first message
 pub fn signed_bitmessage_to_buf(
-    previous_hash: Option<&[u8]>,
     message: &[u8],
+    previous_hash: Option<&[u8]>,
     first_message: bool,
 ) -> ProtoResult<(Vec<u8>, Record)> {
     let mut decoder = BinDecoder::new(message);
@@ -818,7 +818,7 @@ mod tests {
 
         let message_byte = message.to_bytes().unwrap();
 
-        let tbv = signed_bitmessage_to_buf(None, &message_byte, true)
+        let tbv = signed_bitmessage_to_buf(&message_byte, None, true)
             .unwrap()
             .0;
 
@@ -855,7 +855,7 @@ mod tests {
 
         let message_byte = message.to_bytes().unwrap();
 
-        let tbv = signed_bitmessage_to_buf(None, &message_byte, true)
+        let tbv = signed_bitmessage_to_buf(&message_byte, None, true)
             .unwrap()
             .0;
 
