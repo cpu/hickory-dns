@@ -27,6 +27,7 @@ use crate::{
     proto::{
         op::{Edns, Header, LowerQuery, MessageType, OpCode, ResponseCode},
         rr::{LowerName, Record, RecordSet, RecordType},
+        serialize::binary::{BinEncoder, EncodeMode},
     },
     server::{Request, RequestHandler, RequestInfo, ResponseHandler, ResponseInfo},
 };
@@ -257,33 +258,45 @@ impl Catalog {
         if let Some(authorities) = self.find(request_info.query.name()) {
             #[allow(clippy::never_loop)]
             for authority in authorities {
-                let response_code = match authority.zone_type() {
+                let (response_code, signer) = match authority.zone_type() {
                     ZoneType::Secondary => {
                         error!("secondary forwarding for update not yet implemented");
-                        ResponseCode::NotImp
+                        (ResponseCode::NotImp, None)
                     }
                     ZoneType::Primary => {
-                        let update_result = authority.update(update).await;
+                        let (update_result, signer) = authority.update(update).await;
                         match update_result {
                             // successful update
-                            Ok(..) => ResponseCode::NoError,
-                            Err(response_code) => response_code,
+                            Ok(_) => (ResponseCode::NoError, signer),
+                            Err(response_code) => (response_code, signer),
                         }
                     }
-                    _ => ResponseCode::NotAuth,
+                    _ => (ResponseCode::NotAuth, None),
                 };
 
                 let response = MessageResponseBuilder::new(update.raw_queries());
                 let mut response_header =
                     Header::new(update.id(), MessageType::Response, OpCode::Update);
                 response_header.set_response_code(response_code);
+                let mut response = response.build_no_records(response_header);
 
-                return send_response(
-                    response_edns,
-                    response.build_no_records(response_header),
-                    response_handle,
-                )
-                .await;
+                if let Some(signer) = signer {
+                    let mut tbs_response_buf = Vec::with_capacity(512);
+                    let mut encoder =
+                        BinEncoder::with_mode(&mut tbs_response_buf, EncodeMode::Normal);
+                    let mut response_header =
+                        Header::new(update.id(), MessageType::Response, OpCode::Update);
+                    response_header.set_response_code(response_code);
+                    let mut tbs_response = MessageResponseBuilder::new(update.raw_queries())
+                        .build_no_records(response_header);
+                    if let Some(resp_edns) = response_edns.clone() {
+                        tbs_response.set_edns(resp_edns);
+                    }
+                    tbs_response.destructive_emit(&mut encoder)?;
+                    response.set_signature(signer(&tbs_response_buf)?);
+                }
+
+                return send_response(response_edns, response, response_handle).await;
             }
         };
 
@@ -412,7 +425,7 @@ async fn lookup<R: ResponseHandler + Unpin>(
 
         // Wait so we can determine if we need to fire a request to the next authority in a chained
         // configuration if the current authority declines to answer.
-        let mut result = authority.search(request, lookup_options).await;
+        let (mut result, mut signer) = authority.search(request, lookup_options).await;
 
         if let LookupControlFlow::Skip = result {
             trace!("catalog::lookup::authority did not handle request");
@@ -430,7 +443,7 @@ async fn lookup<R: ResponseHandler + Unpin>(
                     trace!("calling authority consult (index {continue_index})");
                 }
 
-                result = consult_authority
+                let (new_result, new_signer) = consult_authority
                     .consult(
                         request_info.query.name(),
                         request_info.query.query_type(),
@@ -438,6 +451,10 @@ async fn lookup<R: ResponseHandler + Unpin>(
                         result,
                     )
                     .await;
+                if let Some(new_signer) = new_signer {
+                    signer = Some(new_signer);
+                }
+                result = new_result;
             }
         } else {
             trace!("catalog::lookup::authority did handle request with break");
@@ -460,13 +477,30 @@ async fn lookup<R: ResponseHandler + Unpin>(
         )
         .await;
 
-        let message_response = MessageResponseBuilder::new(request.raw_queries()).build(
+        let mut message_response = MessageResponseBuilder::new(request.raw_queries()).build(
             response_header,
             sections.answers.iter(),
             sections.ns.iter(),
             sections.soa.iter(),
             sections.additionals.iter(),
         );
+
+        if let Some(signer) = signer {
+            let mut tbs_response_buf = Vec::with_capacity(512);
+            let mut encoder = BinEncoder::with_mode(&mut tbs_response_buf, EncodeMode::Normal);
+            let mut tbs_response = MessageResponseBuilder::new(request.raw_queries()).build(
+                response_header,
+                sections.answers.iter(),
+                sections.ns.iter(),
+                sections.soa.iter(),
+                sections.additionals.iter(),
+            );
+            if let Some(resp_edns) = response_edns.clone() {
+                tbs_response.set_edns(resp_edns);
+            }
+            tbs_response.destructive_emit(&mut encoder)?;
+            message_response.set_signature(signer(&tbs_response_buf)?);
+        }
 
         let result = send_response(response_edns, message_response, response_handle).await;
 
