@@ -10,7 +10,7 @@ use hickory_proto::{
 #[cfg(feature = "__dnssec")]
 use hickory_server::dnssec::NxProofKind;
 use hickory_server::{
-    authority::{Authority, Catalog, MessageRequest, ZoneType},
+    authority::{Authority, AxfrPolicy, Catalog, MessageRequest, ZoneType},
     server::Request,
     store::in_memory::InMemoryAuthority,
 };
@@ -107,7 +107,7 @@ pub fn create_test() -> InMemoryAuthority {
     let mut records = InMemoryAuthority::empty(
         origin.clone(),
         ZoneType::Primary,
-        false,
+        AxfrPolicy::Deny,
         #[cfg(feature = "__dnssec")]
         Some(NxProofKind::Nsec),
     );
@@ -382,11 +382,11 @@ async fn test_non_authoritive_nx_refused() {
 
 #[tokio::test]
 #[allow(clippy::unreadable_literal)]
-async fn test_axfr() {
+async fn test_axfr_allow_all() {
     subscribe();
 
     let mut test = create_test();
-    test.set_allow_axfr(true);
+    test.set_axfr_policy(AxfrPolicy::AllowAll);
 
     let origin = test.origin().clone();
     let soa = Record::from_rdata(
@@ -520,11 +520,11 @@ async fn test_axfr() {
 }
 
 #[tokio::test]
-async fn test_axfr_refused() {
+async fn test_axfr_deny_all() {
     subscribe();
 
     let mut test = create_test();
-    test.set_allow_axfr(false);
+    test.set_axfr_policy(AxfrPolicy::Deny);
 
     let origin = test.origin().clone();
 
@@ -701,7 +701,7 @@ mod dnssec {
         let mut records = InMemoryAuthority::empty(
             origin.clone(),
             ZoneType::Primary,
-            false,
+            AxfrPolicy::Deny,
             Some(NxProofKind::Nsec3 {
                 algorithm: Default::default(),
                 salt: Default::default(),

@@ -23,7 +23,7 @@ use hickory_proto::rr::{DNSClass, Name, RData, Record, RecordType};
 #[cfg(feature = "__dnssec")]
 use hickory_proto::serialize::binary::{BinDecodable, BinEncodable};
 use hickory_proto::xfer::Protocol;
-use hickory_server::authority::{Authority, ZoneType};
+use hickory_server::authority::{Authority, AxfrPolicy, ZoneType};
 use hickory_server::authority::{LookupOptions, MessageRequest};
 #[cfg(feature = "__dnssec")]
 use hickory_server::dnssec::NxProofKind;
@@ -1234,7 +1234,7 @@ async fn test_journal() {
     let in_memory = InMemoryAuthority::empty(
         authority.origin().clone().into(),
         ZoneType::Primary,
-        false,
+        AxfrPolicy::Deny,
         #[cfg(feature = "__dnssec")]
         Some(NxProofKind::Nsec),
     );
@@ -1287,7 +1287,7 @@ async fn test_recovery() {
     let in_memory = InMemoryAuthority::empty(
         authority.origin().clone().into(),
         ZoneType::Primary,
-        false,
+        AxfrPolicy::Deny,
         #[cfg(feature = "__dnssec")]
         Some(NxProofKind::Nsec),
     );
@@ -1343,10 +1343,10 @@ async fn test_recovery() {
 }
 
 #[tokio::test]
-async fn test_axfr() {
+async fn test_axfr_allow_all() {
     subscribe();
     let mut authority = create_example();
-    authority.set_allow_axfr(true);
+    authority.set_axfr_policy(AxfrPolicy::AllowAll);
 
     let query = LowerQuery::from(Query::query(
         Name::from_str("example.com.").unwrap(),
@@ -1369,10 +1369,10 @@ async fn test_axfr() {
 }
 
 #[tokio::test]
-async fn test_refused_axfr() {
+async fn test_axfr_deny_all() {
     subscribe();
     let mut authority = create_example();
-    authority.set_allow_axfr(false);
+    authority.set_axfr_policy(AxfrPolicy::Deny);
 
     let query = LowerQuery::from(Query::query(
         Name::from_str("example.com.").unwrap(),
