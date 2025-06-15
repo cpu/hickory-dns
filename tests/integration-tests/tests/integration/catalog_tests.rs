@@ -16,6 +16,7 @@ use hickory_server::{
 };
 
 use hickory_integration::{example_authority::create_example, *};
+use hickory_server::authority::AxfrPolicy;
 use test_support::subscribe;
 
 #[allow(clippy::unreadable_literal)]
@@ -386,7 +387,7 @@ async fn test_axfr() {
     subscribe();
 
     let mut test = create_test();
-    test.set_allow_axfr(true);
+    test.set_axfr_policy(AxfrPolicy::AllowAll);
 
     let origin = test.origin().clone();
     let soa = Record::from_rdata(
@@ -524,7 +525,7 @@ async fn test_axfr_refused() {
     subscribe();
 
     let mut test = create_test();
-    test.set_allow_axfr(false);
+    test.set_axfr_policy(AxfrPolicy::Deny);
 
     let origin = test.origin().clone();
 

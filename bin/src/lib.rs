@@ -60,7 +60,7 @@ use hickory_server::store::recursor::RecursiveConfig;
 use hickory_server::store::sqlite::{SqliteAuthority, SqliteConfig};
 use hickory_server::{
     ConfigError,
-    authority::{AuthorityObject, ZoneType},
+    authority::{AuthorityObject, AxfrPolicy, ZoneType},
     store::file::FileAuthority,
 };
 use tracing::{debug, info, warn};
@@ -377,7 +377,7 @@ impl ZoneConfig {
                     server_config.stores
                 );
 
-                let is_axfr_allowed = server_config.is_axfr_allowed();
+                let axfr_policy = server_config.axfr_policy();
                 for store in &server_config.stores {
                     let authority: Arc<dyn AuthorityObject> = match store {
                         #[cfg(feature = "sqlite")]
@@ -386,7 +386,7 @@ impl ZoneConfig {
                             let mut authority = SqliteAuthority::try_from_config(
                                 zone_name.clone(),
                                 zone_type,
-                                is_axfr_allowed,
+                                axfr_policy,
                                 server_config.is_dnssec_enabled(),
                                 Some(zone_dir),
                                 config,
@@ -406,7 +406,7 @@ impl ZoneConfig {
                             let mut authority = FileAuthority::try_from_config(
                                 zone_name.clone(),
                                 zone_type,
-                                is_axfr_allowed,
+                                axfr_policy,
                                 Some(zone_dir),
                                 config,
                                 #[cfg(feature = "__dnssec")]
@@ -528,8 +528,8 @@ impl ZoneTypeConfig {
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct ServerZoneConfig {
-    /// Allow AXFR (TODO: need auth)
-    pub allow_axfr: Option<bool>,
+    /// How to determine whether AXFR requests are allowed.
+    pub axfr_policy: AxfrPolicy,
     /// Keys for use by the zone
     #[cfg(feature = "__dnssec")]
     #[serde(default)]
@@ -561,9 +561,9 @@ impl ServerZoneConfig {
         })
     }
 
-    /// enable AXFR transfers
-    pub fn is_axfr_allowed(&self) -> bool {
-        self.allow_axfr.unwrap_or(false)
+    /// Return a policy that can be used to determine how AXFR requests should be handled.
+    pub fn axfr_policy(&self) -> AxfrPolicy {
+        self.axfr_policy
     }
 
     /// declare that this zone should be signed, see keys for configuration of the keys for signing

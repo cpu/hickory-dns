@@ -20,7 +20,7 @@ use tracing::{debug, info};
 #[cfg(feature = "metrics")]
 use crate::store::metrics::StoreMetrics;
 use crate::{
-    authority::{Authority, LookupControlFlow, LookupOptions, UpdateResult, ZoneType},
+    authority::{Authority, AxfrPolicy, LookupControlFlow, LookupOptions, UpdateResult, ZoneType},
     proto::{
         rr::{LowerName, Name, RecordSet, RecordType, RrKey},
         serialize::txt::Parser,
@@ -54,7 +54,7 @@ impl FileAuthority {
     ///   record.
     /// * `records` - The map of the initial set of records in the zone.
     /// * `zone_type` - The type of zone, i.e. is this authoritative?
-    /// * `allow_axfr` - Whether AXFR is allowed.
+    /// * `axfr_policy` - A policy for determining if AXFR is allowed.
     /// * `nx_proof_kind` - The kind of non-existence proof to be used by the server.
     ///
     /// # Return value
@@ -64,7 +64,7 @@ impl FileAuthority {
         origin: Name,
         records: BTreeMap<RrKey, RecordSet>,
         zone_type: ZoneType,
-        allow_axfr: bool,
+        axfr_policy: AxfrPolicy,
         #[cfg(feature = "__dnssec")] nx_proof_kind: Option<NxProofKind>,
     ) -> Result<Self, String> {
         Ok(Self {
@@ -78,7 +78,7 @@ impl FileAuthority {
                 origin,
                 records,
                 zone_type,
-                allow_axfr,
+                axfr_policy,
                 #[cfg(feature = "__dnssec")]
                 nx_proof_kind,
             )?,
@@ -89,7 +89,7 @@ impl FileAuthority {
     pub fn try_from_config(
         origin: Name,
         zone_type: ZoneType,
-        allow_axfr: bool,
+        axfr_policy: AxfrPolicy,
         root_dir: Option<&Path>,
         config: &FileConfig,
         #[cfg(feature = "__dnssec")] nx_proof_kind: Option<NxProofKind>,
@@ -97,7 +97,7 @@ impl FileAuthority {
         Self::try_from_config_internal(
             origin,
             zone_type,
-            allow_axfr,
+            axfr_policy,
             root_dir,
             config,
             #[cfg(feature = "__dnssec")]
@@ -111,7 +111,7 @@ impl FileAuthority {
     pub(crate) fn try_from_config_internal(
         origin: Name,
         zone_type: ZoneType,
-        allow_axfr: bool,
+        axfr_policy: AxfrPolicy,
         root_dir: Option<&Path>,
         config: &FileConfig,
         #[cfg(feature = "__dnssec")] nx_proof_kind: Option<NxProofKind>,
@@ -162,7 +162,7 @@ impl FileAuthority {
                 origin,
                 records,
                 zone_type,
-                allow_axfr,
+                axfr_policy,
                 #[cfg(feature = "__dnssec")]
                 nx_proof_kind,
             )?,
@@ -198,9 +198,9 @@ impl Authority for FileAuthority {
         self.in_memory.zone_type()
     }
 
-    /// Return true if AXFR is allowed
-    fn is_axfr_allowed(&self) -> bool {
-        self.in_memory.is_axfr_allowed()
+    /// Return the policy for determining if AXFR requests are allowed
+    fn axfr_policy(&self) -> AxfrPolicy {
+        self.in_memory.axfr_policy()
     }
 
     /// Perform a dynamic update of a zone
@@ -371,7 +371,7 @@ mod tests {
         let authority = FileAuthority::try_from_config(
             Name::from_str("example.com.").unwrap(),
             ZoneType::Primary,
-            false,
+            AxfrPolicy::Deny,
             None,
             &config,
             #[cfg(feature = "__dnssec")]

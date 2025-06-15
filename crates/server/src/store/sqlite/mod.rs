@@ -28,7 +28,7 @@ use tracing::{error, info, warn};
 #[cfg(feature = "metrics")]
 use crate::store::metrics::StoreMetrics;
 use crate::{
-    authority::{Authority, LookupControlFlow, LookupOptions, UpdateResult, ZoneType},
+    authority::{Authority, AxfrPolicy, LookupControlFlow, LookupOptions, UpdateResult, ZoneType},
     error::{PersistenceError, PersistenceErrorKind},
     proto::{
         op::ResponseCode,
@@ -100,7 +100,7 @@ impl SqliteAuthority {
     pub async fn try_from_config(
         origin: Name,
         zone_type: ZoneType,
-        allow_axfr: bool,
+        axfr_policy: AxfrPolicy,
         enable_dnssec: bool,
         root_dir: Option<&Path>,
         config: &SqliteConfig,
@@ -126,7 +126,7 @@ impl SqliteAuthority {
             let in_memory = InMemoryAuthority::empty(
                 zone_name.clone(),
                 zone_type,
-                allow_axfr,
+                axfr_policy,
                 #[cfg(feature = "__dnssec")]
                 nx_proof_kind,
             );
@@ -152,7 +152,7 @@ impl SqliteAuthority {
             let in_memory = FileAuthority::try_from_config_internal(
                 zone_name.clone(),
                 zone_type,
-                allow_axfr,
+                axfr_policy,
                 root_dir,
                 &file_config,
                 #[cfg(feature = "__dnssec")]
@@ -969,8 +969,8 @@ impl Authority for SqliteAuthority {
     }
 
     /// Return true if AXFR is allowed
-    fn is_axfr_allowed(&self) -> bool {
-        self.in_memory.is_axfr_allowed()
+    fn axfr_policy(&self) -> AxfrPolicy {
+        self.in_memory.axfr_policy()
     }
 
     /// Takes the UpdateMessage, extracts the Records, and applies the changes to the record set.

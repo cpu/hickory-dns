@@ -184,7 +184,7 @@ impl Authority for TestAuthority {
     }
 
     /// Return true if AXFR is allowed
-    fn is_axfr_allowed(&self) -> bool {
+    fn axfr_policy(&self) -> bool {
         false
     }
 
