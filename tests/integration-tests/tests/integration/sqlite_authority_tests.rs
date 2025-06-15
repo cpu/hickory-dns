@@ -23,6 +23,8 @@ use hickory_proto::rr::{DNSClass, Name, RData, Record, RecordType};
 #[cfg(feature = "__dnssec")]
 use hickory_proto::serialize::binary::{BinDecodable, BinEncodable};
 use hickory_proto::xfer::Protocol;
+#[cfg(feature = "__dnssec")]
+use hickory_server::authority::LookupError;
 use hickory_server::authority::{Authority, AxfrPolicy, Queries, ZoneType};
 use hickory_server::authority::{LookupOptions, MessageRequest};
 #[cfg(feature = "__dnssec")]
@@ -1389,8 +1391,41 @@ async fn test_axfr_deny_all() {
         Protocol::Udp,
     );
 
-    let result = authority.search(&request, LookupOptions::default()).await;
+    let err = authority
+        .search(&request, LookupOptions::default())
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        LookupError::ResponseCode(ResponseCode::NotAuth)
+    ))
+}
 
-    // just update this if the count goes up in the authority
-    assert!(result.unwrap_err().is_refused());
+#[cfg(feature = "__dnssec")]
+#[tokio::test]
+async fn test_axfr_deny_unsigned() {
+    subscribe();
+    let mut authority = create_example();
+    authority.set_axfr_policy(AxfrPolicy::AllowSigned);
+
+    let query = LowerQuery::from(Query::query(
+        Name::from_str("example.com.").unwrap(),
+        RecordType::AXFR,
+    ));
+    let queries = Queries::mock(vec![query]);
+    let request = Request::new(
+        MessageRequest::mock(*TEST_HEADER, queries),
+        Bytes::new(),
+        SocketAddr::from((Ipv4Addr::LOCALHOST, 53)),
+        Protocol::Udp,
+    );
+
+    let err = authority
+        .search(&request, LookupOptions::default())
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        LookupError::ResponseCode(ResponseCode::NotAuth)
+    ))
 }
