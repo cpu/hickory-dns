@@ -34,7 +34,7 @@ use crate::{
         op::ResponseCode,
         rr::{DNSClass, LowerName, Name, RData, Record, RecordSet, RecordType, RrKey},
     },
-    server::{Request, RequestInfo},
+    server::Request,
     store::in_memory::InMemoryAuthority,
 };
 #[cfg(feature = "__dnssec")]
@@ -1056,10 +1056,10 @@ impl Authority for SqliteAuthority {
 
     async fn search(
         &self,
-        request_info: RequestInfo<'_>,
+        request: &Request,
         lookup_options: LookupOptions,
     ) -> LookupControlFlow<Self::Lookup> {
-        let search = self.in_memory.search(request_info, lookup_options).await;
+        let search = self.in_memory.search(request, lookup_options).await;
 
         #[cfg(feature = "metrics")]
         self.metrics.query.increment_lookup(&search);

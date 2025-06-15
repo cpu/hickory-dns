@@ -25,7 +25,7 @@ use crate::{
         op::ResponseCode,
         rr::{DNSClass, LowerName, Name, RData, Record, RecordSet, RecordType, RrKey, rdata::SOA},
     },
-    server::{Request, RequestInfo},
+    server::Request,
 };
 #[cfg(feature = "__dnssec")]
 use crate::{
@@ -571,9 +571,13 @@ impl Authority for InMemoryAuthority {
 
     async fn search(
         &self,
-        request_info: RequestInfo<'_>,
+        request: &Request,
         lookup_options: LookupOptions,
     ) -> LookupControlFlow<Self::Lookup> {
+        let request_info = match request.request_info() {
+            Ok(info) => info,
+            Err(e) => return LookupControlFlow::Break(Err(LookupError::from(e))),
+        };
         debug!("searching InMemoryAuthority for: {}", request_info.query);
 
         let lookup_name = request_info.query.name();
@@ -582,7 +586,7 @@ impl Authority for InMemoryAuthority {
         // if this is an AXFR zone transfer, verify that this is either the Secondary or Primary
         //  for AXFR the first and last record must be the SOA
         if RecordType::AXFR == record_type {
-            // TODO: support more advanced AXFR options
+            // TODO: support more advanced AXFR options for the in-memory authority
             if !matches!(self.axfr_policy, AxfrPolicy::AllowAll) {
                 return LookupControlFlow::Continue(Err(LookupError::from(ResponseCode::Refused)));
             }

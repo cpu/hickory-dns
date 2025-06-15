@@ -23,13 +23,12 @@ use hickory_proto::rr::{DNSClass, Name, RData, Record, RecordType};
 #[cfg(feature = "__dnssec")]
 use hickory_proto::serialize::binary::{BinDecodable, BinEncodable};
 use hickory_proto::xfer::Protocol;
-use hickory_server::authority::{Authority, AxfrPolicy, ZoneType};
+use hickory_server::authority::{Authority, AxfrPolicy, Queries, ZoneType};
 use hickory_server::authority::{LookupOptions, MessageRequest};
 #[cfg(feature = "__dnssec")]
 use hickory_server::dnssec::NxProofKind;
 #[cfg(feature = "__dnssec")]
 use hickory_server::server::Request;
-use hickory_server::server::RequestInfo;
 use hickory_server::store::in_memory::InMemoryAuthority;
 use hickory_server::store::sqlite::{Journal, SqliteAuthority};
 use test_support::subscribe;
@@ -57,15 +56,16 @@ async fn test_search() {
     let mut query: Query = Query::new();
     query.set_name(origin.into());
     let query = LowerQuery::from(query);
-    let request_info = RequestInfo::new(
+    let queries = Queries::mock(vec![query]);
+    let request = Request::new(
+        MessageRequest::mock(*TEST_HEADER, queries),
+        Bytes::new(),
         SocketAddr::from((Ipv4Addr::LOCALHOST, 53)),
         Protocol::Udp,
-        TEST_HEADER,
-        &query,
     );
 
     let result = example
-        .search(request_info, LookupOptions::default())
+        .search(&request, LookupOptions::default())
         .await
         .unwrap();
     if !result.is_empty() {
@@ -88,15 +88,16 @@ async fn test_search_www() {
     let mut query: Query = Query::new();
     query.set_name(www_name);
     let query = LowerQuery::from(query);
-    let request_info = RequestInfo::new(
+    let queries = Queries::mock(vec![query]);
+    let request = Request::new(
+        MessageRequest::mock(*TEST_HEADER, queries),
+        Bytes::new(),
         SocketAddr::from((Ipv4Addr::LOCALHOST, 53)),
         Protocol::Udp,
-        TEST_HEADER,
-        &query,
     );
 
     let result = example
-        .search(request_info, LookupOptions::default())
+        .search(&request, LookupOptions::default())
         .await
         .unwrap();
     if !result.is_empty() {
@@ -1353,15 +1354,16 @@ async fn test_axfr_allow_all() {
         Name::from_str("example.com.").unwrap(),
         RecordType::AXFR,
     ));
-    let request_info = RequestInfo::new(
+    let queries = Queries::mock(vec![query]);
+    let request = Request::new(
+        MessageRequest::mock(*TEST_HEADER, queries),
+        Bytes::new(),
         SocketAddr::from((Ipv4Addr::LOCALHOST, 53)),
         Protocol::Udp,
-        TEST_HEADER,
-        &query,
     );
 
     let result = authority
-        .search(request_info, LookupOptions::default())
+        .search(&request, LookupOptions::default())
         .await
         .unwrap();
 
@@ -1379,16 +1381,15 @@ async fn test_axfr_deny_all() {
         Name::from_str("example.com.").unwrap(),
         RecordType::AXFR,
     ));
-    let request_info = RequestInfo::new(
+    let queries = Queries::mock(vec![query]);
+    let request = Request::new(
+        MessageRequest::mock(*TEST_HEADER, queries),
+        Bytes::new(),
         SocketAddr::from((Ipv4Addr::LOCALHOST, 53)),
         Protocol::Udp,
-        TEST_HEADER,
-        &query,
     );
 
-    let result = authority
-        .search(request_info, LookupOptions::default())
-        .await;
+    let result = authority.search(&request, LookupOptions::default()).await;
 
     // just update this if the count goes up in the authority
     assert!(result.unwrap_err().is_refused());
