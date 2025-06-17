@@ -341,7 +341,7 @@ impl TSIG {
         encoder.emit_u16(self.fudge)?;
         encoder.emit_u16(match self.error {
             None => 0,
-            Some(err) => u16::from(err)
+            Some(err) => u16::from(err),
         })?;
         encoder.emit_u16(self.other.len() as u16)?;
         encoder.emit_vec(&self.other)?;
@@ -402,7 +402,7 @@ impl BinEncodable for TSIG {
         encoder.emit_u16(self.oid)?;
         encoder.emit_u16(match self.error {
             None => 0,
-            Some(err) => u16::from(err)
+            Some(err) => u16::from(err),
         })?;
         encoder.emit_u16(self.other.len().try_into().map_err(|_| {
             ProtoError::from("invalid other_buffer, longer than 65535 B in TSIG")

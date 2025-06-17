@@ -252,7 +252,7 @@ async fn test_authorize_update() {
     );
 
     assert_eq!(
-        authority.authorize_update(&request).await,
+        authority.authorize_update(&request).await.0,
         Err(ResponseCode::Refused)
     );
 
@@ -981,10 +981,10 @@ async fn test_update_tsig_invalid_unknown_signer() {
         Protocol::Udp,
     );
 
-    // The update should have been refused.
+    // The update should have been rejected as not authorized.
     assert_eq!(
         authority.update(&request).await.0,
-        Err(ResponseCode::Refused)
+        Err(ResponseCode::NotAuth)
     );
 }
 
@@ -1030,10 +1030,10 @@ async fn test_update_tsig_invalid_sig() {
         Protocol::Udp,
     );
 
-    // The update should have been refused.
+    // The update should have been rejected as not authorized.
     assert_eq!(
         authority.update(&request).await.0,
-        Err(ResponseCode::Refused)
+        Err(ResponseCode::NotAuth)
     );
 }
 
@@ -1073,10 +1073,10 @@ async fn test_update_tsig_invalid_stale_sig() {
         Protocol::Udp,
     );
 
-    // The update should have been refused.
+    // The update should have been rejected as not authorized.
     assert_eq!(
         authority.update(&request).await.0,
-        Err(ResponseCode::Refused)
+        Err(ResponseCode::NotAuth)
     );
 }
 
