@@ -105,7 +105,7 @@ impl<'q> MessageResponseBuilder<'q> {
     /// # Arguments
     ///
     /// * `queries` - queries (from the Request) to associate with the Response
-    pub(crate) fn new(queries: &'q Queries) -> Self {
+    pub fn new(queries: &'q Queries) -> Self {
         MessageResponseBuilder {
             queries,
             signature: MessageSignature::default(),
