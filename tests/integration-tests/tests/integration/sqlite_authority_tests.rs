@@ -8,31 +8,34 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(feature = "__dnssec")]
 use bytes::Bytes;
-use hickory_proto::rr::LowerName;
-use rusqlite::*;
-
+use hickory_proto::dnssec::rdata::DNSSECRData;
 #[cfg(feature = "__dnssec")]
 use hickory_proto::dnssec::rdata::tsig::TsigAlgorithm;
+use hickory_proto::dnssec::rdata::tsig::TsigError;
 #[cfg(feature = "__dnssec")]
 use hickory_proto::dnssec::tsig::TSigner;
+#[cfg(feature = "__dnssec")]
+use hickory_proto::op::MessageSignature;
 use hickory_proto::op::{
     Header, LowerQuery, Message, MessageSigner, MessageType, OpCode, Query, ResponseCode,
 };
 use hickory_proto::rr::rdata::{A, AAAA, NS, TXT};
-use hickory_proto::rr::{DNSClass, Name, RData, Record, RecordType};
+use hickory_proto::rr::{DNSClass, LowerName, Name, RData, Record, RecordType};
 #[cfg(feature = "__dnssec")]
-use hickory_proto::serialize::binary::{BinDecodable, BinEncodable};
+use hickory_proto::serialize::binary::{BinDecodable, BinEncodable, BinEncoder, EncodeMode};
 use hickory_proto::xfer::Protocol;
 #[cfg(feature = "__dnssec")]
 use hickory_server::authority::LookupError;
-use hickory_server::authority::{Authority, AxfrPolicy, Queries, ZoneType};
-use hickory_server::authority::{LookupOptions, MessageRequest};
+use hickory_server::authority::{
+    Authority, AxfrPolicy, LookupOptions, MessageRequest, MessageResponseBuilder, Queries, ZoneType,
+};
 #[cfg(feature = "__dnssec")]
 use hickory_server::dnssec::NxProofKind;
 #[cfg(feature = "__dnssec")]
 use hickory_server::server::Request;
 use hickory_server::store::in_memory::InMemoryAuthority;
 use hickory_server::store::sqlite::{Journal, SqliteAuthority};
+use rusqlite::*;
 use test_support::subscribe;
 
 const TEST_HEADER: &Header = &Header::new(10, MessageType::Query, OpCode::Query);
@@ -908,6 +911,16 @@ async fn test_update_tsig_valid() {
     let (sig, _) = (&signer as &dyn MessageSigner)
         .sign_message(&message, now as u32)
         .unwrap();
+    // Save the MAC of the request so we can verify the response.
+    let MessageSignature::Tsig(tsig_rr) = sig.clone() else {
+        panic!("unexpected message signature type");
+    };
+    let tsig_rr = tsig_rr
+        .data()
+        .as_dnssec()
+        .and_then(DNSSECRData::as_tsig)
+        .unwrap();
+    let request_mac = tsig_rr.mac();
     message.set_signature(sig);
 
     // TODO(@cpu): add and use a MessageRequestBuilder type?
@@ -916,13 +929,50 @@ async fn test_update_tsig_valid() {
     let req_message = MessageRequest::from_bytes(&bytes).unwrap();
     let request = Request::new(
         req_message,
-        Bytes::from(bytes),
+        Bytes::from(bytes.clone()),
         SocketAddr::from(([127, 0, 0, 1], 53)),
         Protocol::Udp,
     );
 
     // The update should succeed.
-    authority.update(&request).await.0.unwrap();
+    let (resp, resp_signer) = authority.update(&request).await;
+    assert!(resp.unwrap());
+
+    // We should have produced a resp_signer.
+    let resp_signer = resp_signer.expect("missing expected TSIG response signer");
+
+    // Build an initial unsigned response for the update.
+    // The catalog handles this in normal operation, but we're testing at the level of the
+    // SqliteAuthority and so have to do this ourselves.
+    let response = MessageResponseBuilder::new(request.raw_queries());
+    let mut response_header = Header::new(request.id(), MessageType::Response, OpCode::Update);
+    response_header.set_response_code(ResponseCode::NoError);
+    let mut response = response.build_no_records(response_header);
+
+    // Serialize the unsigned response to get the TBS bytes to sign with the signer.
+    let mut tbs_response_buf = Vec::with_capacity(512);
+    let mut encoder = BinEncoder::with_mode(&mut tbs_response_buf, EncodeMode::Normal);
+    let mut response_header = Header::new(request.id(), MessageType::Response, OpCode::Update);
+    response_header.set_response_code(ResponseCode::NoError);
+    let tbs_response =
+        MessageResponseBuilder::new(request.raw_queries()).build_no_records(response_header);
+    tbs_response.destructive_emit(&mut encoder).unwrap();
+
+    // Update the response with the produced signature.
+    let resp_sig = resp_signer(&tbs_response_buf).unwrap();
+    response.set_signature(resp_sig.clone());
+
+    // Serialize the now-signed response.
+    let mut response_buf = Vec::with_capacity(512);
+    let mut encoder = BinEncoder::with_mode(&mut response_buf, EncodeMode::Normal);
+    response.destructive_emit(&mut encoder).unwrap();
+
+    // We should be able to verify the signature and confirm the signing time is within the
+    // validity range based on the fudge factor.
+    let (_, _, range) = signer
+        .verify_message_byte(&response_buf, Some(request_mac), true)
+        .unwrap();
+    assert!(range.contains(&now));
 
     // And we should now be able to look up the new record.
     let new_name = Name::from_str("new.example.com.").unwrap();
@@ -981,11 +1031,28 @@ async fn test_update_tsig_invalid_unknown_signer() {
         Protocol::Udp,
     );
 
+    let (res, resp_signer) = authority.update(&request).await;
+
     // The update should have been rejected as not authorized.
-    assert_eq!(
-        authority.update(&request).await.0,
-        Err(ResponseCode::NotAuth)
-    );
+    assert_eq!(res, Err(ResponseCode::NotAuth));
+
+    // We should have received a response signer that when invoked, produces an
+    // unsigned TSIG RR with the expected TSIG error RCODE.
+    let resp_signer = resp_signer.expect("missing expected response signer");
+    // We don't need to pass in a response here - it's not used for this error case.
+    let Ok(MessageSignature::Tsig(tsig_rr)) = resp_signer(&[]) else {
+        panic!("unexpected result from resp_signer");
+    };
+    let tsig_rr = tsig_rr
+        .data()
+        .as_dnssec()
+        .and_then(DNSSECRData::as_tsig)
+        .unwrap();
+
+    // The TSIG RR should be unsigned.
+    assert_eq!(tsig_rr.mac(), &[]);
+    // The TSIG RR should have the expected TSIG error RCODE.
+    assert_eq!(tsig_rr.error(), &Some(TsigError::BadKey));
 }
 
 #[cfg(feature = "__dnssec")]
@@ -1030,11 +1097,28 @@ async fn test_update_tsig_invalid_sig() {
         Protocol::Udp,
     );
 
+    let (res, resp_signer) = authority.update(&request).await;
+
     // The update should have been rejected as not authorized.
-    assert_eq!(
-        authority.update(&request).await.0,
-        Err(ResponseCode::NotAuth)
-    );
+    assert_eq!(res, Err(ResponseCode::NotAuth));
+
+    // We should have received a response signer that when invoked, produces an
+    // unsigned TSIG RR with the expected TSIG error RCODE.
+    let resp_signer = resp_signer.expect("missing expected response signer");
+    // We don't need to pass in a response here - it's not used for this error case.
+    let Ok(MessageSignature::Tsig(tsig_rr)) = resp_signer(&[]) else {
+        panic!("unexpected result from resp_signer");
+    };
+    let tsig_rr = tsig_rr
+        .data()
+        .as_dnssec()
+        .and_then(DNSSECRData::as_tsig)
+        .unwrap();
+
+    // The TSIG RR should be unsigned.
+    assert_eq!(tsig_rr.mac(), &[]);
+    // The TSIG RR should have the expected TSIG error RCODE.
+    assert_eq!(tsig_rr.error(), &Some(TsigError::BadSig));
 }
 
 #[cfg(feature = "__dnssec")]
@@ -1060,6 +1144,16 @@ async fn test_update_tsig_invalid_stale_sig() {
     let (sig, _) = (&signer as &dyn MessageSigner)
         .sign_message(&message, too_stale as u32)
         .unwrap();
+    // Save the MAC of the request so we can verify the response.
+    let MessageSignature::Tsig(tsig_rr) = sig.clone() else {
+        panic!("unexpected message signature type");
+    };
+    let tsig_rr = tsig_rr
+        .data()
+        .as_dnssec()
+        .and_then(DNSSECRData::as_tsig)
+        .unwrap();
+    let request_mac = tsig_rr.mac();
     message.set_signature(sig);
 
     // TODO(@cpu): add and use a MessageRequestBuilder type?
@@ -1074,10 +1168,56 @@ async fn test_update_tsig_invalid_stale_sig() {
     );
 
     // The update should have been rejected as not authorized.
-    assert_eq!(
-        authority.update(&request).await.0,
-        Err(ResponseCode::NotAuth)
-    );
+    let (resp, resp_signer) = authority.update(&request).await;
+    assert_eq!(resp, Err(ResponseCode::NotAuth));
+
+    // We should have produced a resp_signer.
+    let resp_signer = resp_signer.expect("missing expected TSIG response signer");
+
+    // Build an initial unsigned response for the update.
+    // The catalog handles this in normal operation, but we're testing at the level of the
+    // SqliteAuthority and so have to do this ourselves.
+    let response = MessageResponseBuilder::new(request.raw_queries());
+    let mut response_header = Header::new(request.id(), MessageType::Response, OpCode::Update);
+    response_header.set_response_code(ResponseCode::NotAuth);
+    let mut response = response.build_no_records(response_header);
+
+    // Serialize the unsigned response to get the TBS bytes to sign with the signer.
+    let mut tbs_response_buf = Vec::with_capacity(512);
+    let mut encoder = BinEncoder::with_mode(&mut tbs_response_buf, EncodeMode::Normal);
+    let mut response_header = Header::new(request.id(), MessageType::Response, OpCode::Update);
+    response_header.set_response_code(ResponseCode::NotAuth);
+    let tbs_response =
+        MessageResponseBuilder::new(request.raw_queries()).build_no_records(response_header);
+    tbs_response.destructive_emit(&mut encoder).unwrap();
+
+    // Update the response with the produced signature.
+    let resp_sig = resp_signer(&tbs_response_buf).unwrap();
+    let MessageSignature::Tsig(rr) = resp_sig.clone() else {
+        panic!("unexpected response message signature type");
+    };
+    let tsig_rr = rr
+        .data()
+        .as_dnssec()
+        .and_then(DNSSECRData::as_tsig)
+        .unwrap();
+    response.set_signature(resp_sig);
+
+    // Serialize the now-signed response.
+    let mut response_buf = Vec::with_capacity(512);
+    let mut encoder = BinEncoder::with_mode(&mut response_buf, EncodeMode::Normal);
+    response.destructive_emit(&mut encoder).unwrap();
+
+    // We should be able to verify the signature and confirm the signing time is within the
+    // validity range based on the fudge factor.
+    let (_, _, range) = signer
+        .verify_message_byte(&response_buf, Some(request_mac), true)
+        .unwrap();
+    assert!(range.contains(&now));
+
+    // The TSIG RR should indicate the correct TSIG error RCODE based on our
+    // request TSIG being expired.
+    assert_eq!(tsig_rr.error(), &Some(TsigError::BadTime))
 }
 
 #[cfg(feature = "__dnssec")]
@@ -1442,4 +1582,48 @@ async fn test_axfr_deny_unsigned() {
         err,
         LookupError::ResponseCode(ResponseCode::NotAuth)
     ))
+}
+
+#[tokio::test]
+async fn test_axfr_allow_tsig_signed() {
+    subscribe();
+
+    let signer = test_tsig_signer(Name::from_str("test-tsig-key").unwrap());
+
+    let mut authority = create_example();
+    authority.set_axfr_policy(AxfrPolicy::AllowSigned);
+    authority.set_tsig_signers(vec![signer.clone()]);
+
+    let query = Query::query(Name::from_str("example.com.").unwrap(), RecordType::AXFR);
+    let mut message = Message::query();
+    message.add_query(query);
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|t| t.as_secs())
+        .unwrap();
+
+    let (sig, _) = (&signer as &dyn MessageSigner)
+        .sign_message(&message, now as u32)
+        .unwrap();
+    message.set_signature(sig);
+
+    // Round-trip the Message bytes into a MessageRequest.
+    let bytes = message.to_bytes().unwrap();
+    let req_message = MessageRequest::from_bytes(&bytes).unwrap();
+    let request = Request::new(
+        req_message,
+        Bytes::from(bytes.clone()),
+        SocketAddr::from(([127, 0, 0, 1], 53)),
+        Protocol::Udp,
+    );
+
+    let (resp, resp_signer) = authority.search(&request, LookupOptions::default()).await;
+
+    // We should get results back.
+    assert_eq!(resp.unwrap().iter().count(), 12);
+    // And there should be a signer returned. See `test_update_tsig_valid` for
+    // testing that the response signer works as expected - the logic is the same
+    // between updates + AXFR.
+    assert!(resp_signer.is_some());
 }
