@@ -286,7 +286,10 @@ pub struct TSigResponseSigner {
 }
 
 impl ResponseSigner for TSigResponseSigner {
-    fn sign(&self, encoded_unsigned_response: &[u8]) -> Result<MessageSignature, ProtoError> {
+    fn sign(
+        self: Box<Self>,
+        encoded_unsigned_response: &[u8],
+    ) -> Result<MessageSignature, ProtoError> {
         let mut stub_tsig = self.signer.stub_tsig(self.request_id, self.time);
 
         match self.error {

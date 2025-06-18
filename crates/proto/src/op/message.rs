@@ -934,7 +934,10 @@ pub trait MessageSigner: Send + Sync + 'static {
 /// A trait for producing a `MessageSignature` for responses
 pub trait ResponseSigner: Send + Sync {
     /// sign produces a `MessageSignature` for the provided encoded, unsigned, response message.
-    fn sign(&self, encoded_unsigned_response: &[u8]) -> Result<MessageSignature, ProtoError>;
+    fn sign(
+        self: Box<Self>,
+        encoded_unsigned_response: &[u8],
+    ) -> Result<MessageSignature, ProtoError>;
 }
 
 /// Returns the count written and a boolean if it was truncated

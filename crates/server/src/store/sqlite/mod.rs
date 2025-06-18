@@ -1296,7 +1296,7 @@ struct UnknownKeyTsigResponseSigner {
 
 #[cfg(feature = "__dnssec")]
 impl ResponseSigner for UnknownKeyTsigResponseSigner {
-    fn sign(&self, _: &[u8]) -> Result<MessageSignature, ProtoError> {
+    fn sign(self: Box<Self>, _: &[u8]) -> Result<MessageSignature, ProtoError> {
         // "If a non-forwarding server does not recognize the key or algorithm used by the
         // client (or recognizes the algorithm but does not implement it), the server MUST
         // generate an error response with RCODE 9 (NOTAUTH) and TSIG ERROR 17 (BADKEY).
