@@ -29,10 +29,11 @@ use crate::{authority::Nsec3QueryInfo, dnssec::NxProofKind, proto::dnssec::Trust
 use crate::{
     authority::{
         Authority, AxfrPolicy, LookupControlFlow, LookupError, LookupObject, LookupOptions,
-        ResponseSigner, UpdateResult, ZoneType,
+        UpdateResult, ZoneType,
     },
     error::ConfigError,
     proto::{
+        op::message::ResponseSigner,
         op::{Query, ResponseCode},
         rr::{LowerName, Name, RData, Record, RecordSet, RecordType},
         runtime::RuntimeProvider,
@@ -117,7 +118,10 @@ impl<P: RuntimeProvider> Authority for RecursiveAuthority<P> {
         self.recursor.is_validating()
     }
 
-    async fn update(&self, _update: &Request) -> (UpdateResult<bool>, Option<ResponseSigner>) {
+    async fn update(
+        &self,
+        _update: &Request,
+    ) -> (UpdateResult<bool>, Option<Box<dyn ResponseSigner>>) {
         (Err(ResponseCode::NotImp), None)
     }
 
@@ -173,7 +177,10 @@ impl<P: RuntimeProvider> Authority for RecursiveAuthority<P> {
         &self,
         request: &Request,
         lookup_options: LookupOptions,
-    ) -> (LookupControlFlow<Self::Lookup>, Option<ResponseSigner>) {
+    ) -> (
+        LookupControlFlow<Self::Lookup>,
+        Option<Box<dyn ResponseSigner>>,
+    ) {
         let request_info = match request.request_info() {
             Ok(info) => info,
             Err(e) => return (LookupControlFlow::Break(Err(LookupError::from(e))), None),

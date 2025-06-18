@@ -27,12 +27,13 @@ use tracing::{debug, error, info, warn};
 use crate::store::metrics::StoreMetrics;
 use crate::{
     authority::{
-        Authority, AxfrPolicy, LookupControlFlow, LookupError, LookupOptions, ResponseSigner,
-        UpdateResult, ZoneType,
+        Authority, AxfrPolicy, LookupControlFlow, LookupError, LookupOptions, UpdateResult,
+        ZoneType,
     },
     error::{PersistenceError, PersistenceErrorKind},
     proto::{
         op::ResponseCode,
+        op::message::ResponseSigner,
         rr::{DNSClass, LowerName, Name, RData, Record, RecordSet, RecordType, RrKey},
     },
     server::Request,
@@ -50,7 +51,7 @@ use crate::{
             key::KEY,
             tsig::{TsigAlgorithm, TsigError, make_tsig_record},
         },
-        tsig::TSigner,
+        tsig::{TSigResponseSigner, TSigner},
     },
     proto::op::MessageSignature,
 };
@@ -550,7 +551,7 @@ impl SqliteAuthority {
     pub async fn authorize_update(
         &self,
         request: &Request,
-    ) -> (UpdateResult<()>, Option<ResponseSigner>) {
+    ) -> (UpdateResult<()>, Option<Box<dyn ResponseSigner>>) {
         // 3.3.3 - Pseudocode for Permission Checking
         //
         //      if (security policy exists)
@@ -583,7 +584,7 @@ impl SqliteAuthority {
     async fn authorize_axfr(
         &self,
         _request: &Request,
-    ) -> (Result<(), ResponseCode>, Option<ResponseSigner>) {
+    ) -> (Result<(), ResponseCode>, Option<Box<dyn ResponseSigner>>) {
         match self.axfr_policy {
             // Deny without checking any signatures.
             AxfrPolicy::Deny => (Err(ResponseCode::NotAuth), None),
@@ -974,7 +975,7 @@ impl SqliteAuthority {
         &self,
         tsig: &Record,
         request: &Request,
-    ) -> (UpdateResult<()>, ResponseSigner) {
+    ) -> (UpdateResult<()>, Box<dyn ResponseSigner>) {
         let req_id = request.header().id();
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -988,50 +989,28 @@ impl SqliteAuthority {
             .find(|tsigner| tsigner.signer_name() == tsig.name())
         else {
             warn!("no TSIG key name matched: id {req_id}");
-            // "If a non-forwarding server does not recognize the key or algorithm used by the
-            // client (or recognizes the algorithm but does not implement it), the server MUST
-            // generate an error response with RCODE 9 (NOTAUTH) and TSIG ERROR 17 (BADKEY).
-            // This response MUST be unsigned"
-            //
-            // Note that this doesn't specify what TSIG algorithm, fudge, or key name we
-            // should use in the response since we didn't recognize the key name as one
-            // of our configured signers. We choose a stand-in algorithm and reflect the
-            // unknown key name in absence of further direction.
-            let unknown_key = tsig.name().clone();
-            let unknown_key_signer = Box::new(move |_: &[u8]| {
-                let err_tsig = TSIG::new(
-                    TsigAlgorithm::HmacSha256,
-                    now,
-                    300,
-                    Vec::new(),
-                    req_id,
-                    Some(TsigError::BadKey),
-                    Vec::new(),
-                );
-                Ok(MessageSignature::Tsig(make_tsig_record(
-                    unknown_key,
-                    err_tsig,
-                )))
-            });
-            return (Err(ResponseCode::NotAuth), unknown_key_signer);
+            return (
+                Err(ResponseCode::NotAuth),
+                Box::new(UnknownKeyTsigResponseSigner {
+                    time: now,
+                    key_name: tsig.name().clone(),
+                    request_id: req_id,
+                }),
+            );
         };
 
         let Ok((_, _, range)) = tsigner.verify_message_byte(request.as_slice(), None, true) else {
             warn!("invalid TSIG signature: id {req_id}");
-            // "If the MAC fails to verify, the server MUST generate an error response as specified in
-            // Section 5.3.2 with RCODE 9 (NOTAUTH) and TSIG ERROR 16 (BADSIG). This response MUST
-            // be unsigned"
-            let signer_name = tsigner.signer_name().clone();
-            let tsigner = tsigner.clone();
-            let err_signer = Box::new(move |_: &[u8]| {
-                let mut err_tsig = tsigner.stub_tsig(req_id, now);
-                err_tsig.set_error(TsigError::BadSig);
-                Ok(MessageSignature::Tsig(make_tsig_record(
-                    signer_name,
-                    err_tsig,
-                )))
-            });
-            return (Err(ResponseCode::NotAuth), err_signer);
+            return (
+                Err(ResponseCode::NotAuth),
+                Box::new(TSigResponseSigner {
+                    signer: tsigner.clone(),
+                    time: now,
+                    error: Some(TsigError::BadSig),
+                    request_id: req_id,
+                    request_mac: Vec::new(),
+                }),
+            );
         };
 
         let mut error = None;
@@ -1051,28 +1030,16 @@ impl SqliteAuthority {
             .as_dnssec()
             .and_then(DNSSECRData::as_tsig)
             .unwrap();
-        let req_mac = req_tsig.mac().to_vec();
-        let tsigner = tsigner.clone();
-        let response_signer = Box::new(move |encoded_resp: &[u8]| {
-            let mut tbs_tsig = tsigner.stub_tsig(req_id, now);
-            if let Some(error) = error {
-                tbs_tsig.set_error(error);
-            }
-
-            let tbs_tsig_encoded =
-                tsigner.encode_response_tbs(&req_mac, encoded_resp, &tbs_tsig)?;
-            let resp_tsig = tbs_tsig.set_mac(
-                tsigner
-                    .sign(&tbs_tsig_encoded)
-                    .map_err(|e| ProtoError::from(e.to_string()))?,
-            );
-            Ok(MessageSignature::Tsig(make_tsig_record(
-                tsigner.signer_name().clone(),
-                resp_tsig,
-            )))
-        });
-
-        (response, response_signer)
+        (
+            response,
+            Box::new(TSigResponseSigner {
+                signer: tsigner.clone(),
+                time: now,
+                error,
+                request_id: req_id,
+                request_mac: req_tsig.mac().to_vec(),
+            }),
+        )
     }
 }
 
@@ -1119,7 +1086,10 @@ impl Authority for SqliteAuthority {
     ///
     /// See [RFC 2136](https://datatracker.ietf.org/doc/html/rfc2136#section-3) section 3.4 for
     /// details.
-    async fn update(&self, _request: &Request) -> (UpdateResult<bool>, Option<ResponseSigner>) {
+    async fn update(
+        &self,
+        _request: &Request,
+    ) -> (UpdateResult<bool>, Option<Box<dyn ResponseSigner>>) {
         #[cfg(feature = "__dnssec")]
         {
             // the spec says to authorize after prereqs, seems better to auth first.
@@ -1183,7 +1153,10 @@ impl Authority for SqliteAuthority {
         &self,
         request: &Request,
         lookup_options: LookupOptions,
-    ) -> (LookupControlFlow<Self::Lookup>, Option<ResponseSigner>) {
+    ) -> (
+        LookupControlFlow<Self::Lookup>,
+        Option<Box<dyn ResponseSigner>>,
+    ) {
         let request_info = match request.request_info() {
             Ok(info) => info,
             Err(e) => return (LookupControlFlow::Break(Err(LookupError::from(e))), None),
@@ -1312,6 +1285,40 @@ pub struct TsigKeyConfig {
 #[cfg(feature = "__dnssec")]
 pub(crate) fn default_fudge() -> u16 {
     300
+}
+
+#[cfg(feature = "__dnssec")]
+struct UnknownKeyTsigResponseSigner {
+    time: u64,
+    key_name: Name,
+    request_id: u16,
+}
+
+#[cfg(feature = "__dnssec")]
+impl ResponseSigner for UnknownKeyTsigResponseSigner {
+    fn sign(&self, _: &[u8]) -> Result<MessageSignature, ProtoError> {
+        // "If a non-forwarding server does not recognize the key or algorithm used by the
+        // client (or recognizes the algorithm but does not implement it), the server MUST
+        // generate an error response with RCODE 9 (NOTAUTH) and TSIG ERROR 17 (BADKEY).
+        // This response MUST be unsigned"
+        //
+        // Note that this doesn't specify what TSIG algorithm, fudge, or key name we
+        // should use in the response since we didn't recognize the key name as one
+        // of our configured signers. We choose a stand-in algorithm and reflect the
+        // unknown key name in absence of further direction.
+        Ok(MessageSignature::Tsig(make_tsig_record(
+            self.key_name.clone(),
+            TSIG::new(
+                TsigAlgorithm::HmacSha256,
+                self.time,
+                300,
+                Vec::new(),
+                self.request_id,
+                Some(TsigError::BadKey),
+                Vec::new(),
+            ),
+        )))
+    }
 }
 
 #[cfg(test)]

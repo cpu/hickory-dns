@@ -959,7 +959,7 @@ async fn test_update_tsig_valid() {
     tbs_response.destructive_emit(&mut encoder).unwrap();
 
     // Update the response with the produced signature.
-    let resp_sig = resp_signer(&tbs_response_buf).unwrap();
+    let resp_sig = resp_signer.sign(&tbs_response_buf).unwrap();
     response.set_signature(resp_sig.clone());
 
     // Serialize the now-signed response.
@@ -1040,7 +1040,7 @@ async fn test_update_tsig_invalid_unknown_signer() {
     // unsigned TSIG RR with the expected TSIG error RCODE.
     let resp_signer = resp_signer.expect("missing expected response signer");
     // We don't need to pass in a response here - it's not used for this error case.
-    let Ok(MessageSignature::Tsig(tsig_rr)) = resp_signer(&[]) else {
+    let Ok(MessageSignature::Tsig(tsig_rr)) = resp_signer.sign(&[]) else {
         panic!("unexpected result from resp_signer");
     };
     let tsig_rr = tsig_rr
@@ -1106,7 +1106,7 @@ async fn test_update_tsig_invalid_sig() {
     // unsigned TSIG RR with the expected TSIG error RCODE.
     let resp_signer = resp_signer.expect("missing expected response signer");
     // We don't need to pass in a response here - it's not used for this error case.
-    let Ok(MessageSignature::Tsig(tsig_rr)) = resp_signer(&[]) else {
+    let Ok(MessageSignature::Tsig(tsig_rr)) = resp_signer.sign(&[]) else {
         panic!("unexpected result from resp_signer");
     };
     let tsig_rr = tsig_rr
@@ -1192,7 +1192,7 @@ async fn test_update_tsig_invalid_stale_sig() {
     tbs_response.destructive_emit(&mut encoder).unwrap();
 
     // Update the response with the produced signature.
-    let resp_sig = resp_signer(&tbs_response_buf).unwrap();
+    let resp_sig = resp_signer.sign(&tbs_response_buf).unwrap();
     let MessageSignature::Tsig(rr) = resp_sig.clone() else {
         panic!("unexpected response message signature type");
     };

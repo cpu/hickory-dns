@@ -24,10 +24,11 @@ use tracing::debug;
 
 use super::rdata::DNSSECRData;
 use super::rdata::tsig::{
-    TSIG, TsigAlgorithm, make_tsig_record, message_tbs, signed_bitmessage_to_buf,
+    TSIG, TsigAlgorithm, TsigError, make_tsig_record, message_tbs, signed_bitmessage_to_buf,
 };
 use super::{DnsSecError, DnsSecErrorKind};
 use crate::error::{ProtoError, ProtoResult};
+use crate::op::message::ResponseSigner;
 use crate::op::{Message, MessageSignature, MessageSigner, MessageVerifier};
 use crate::rr::{Name, RData};
 use crate::serialize::binary::{BinEncoder, EncodeMode};
@@ -264,6 +265,60 @@ impl MessageSigner for TSigner {
             }
         };
         Ok((MessageSignature::Tsig(tsig), Some(Box::new(verifier))))
+    }
+}
+
+/// A TSIG response signer constructed in response to a specific request
+pub struct TSigResponseSigner {
+    /// A TSigner to use to produce a signature for signed TSIG RRs
+    pub signer: TSigner,
+    /// The time the request TSIG RR MAC was validated
+    pub time: u64,
+    /// An optional error to include in the TSIG RR
+    ///
+    /// If `TsigError::BadSig` or `TsigError::BadKey` are specified, the built `MessageSignature`
+    /// TSIG RR will be unsigned.
+    pub error: Option<TsigError>,
+    /// The ID of the authenticated request the response is in reply to
+    pub request_id: u16,
+    /// The validated MAC of the TSIG RR from the request
+    pub request_mac: Vec<u8>,
+}
+
+impl ResponseSigner for TSigResponseSigner {
+    fn sign(&self, encoded_unsigned_response: &[u8]) -> Result<MessageSignature, ProtoError> {
+        let mut stub_tsig = self.signer.stub_tsig(self.request_id, self.time);
+
+        match self.error {
+            // BadSig and BadKey are both spec'd to return **unsigned** TSIG RRs.
+            Some(err) if err == TsigError::BadSig || err == TsigError::BadKey => {
+                stub_tsig.set_error(err);
+                return Ok(MessageSignature::Tsig(make_tsig_record(
+                    self.signer.signer_name().clone(),
+                    stub_tsig,
+                )));
+            }
+            // BadTime is explicitly said to be signed. BadTrunc doesn't specify
+            // one way or the other.
+            Some(err) => stub_tsig.set_error(err),
+            None => {}
+        }
+
+        let tbs_tsig_encoded = self.signer.encode_response_tbs(
+            &self.request_mac,
+            encoded_unsigned_response,
+            &stub_tsig,
+        )?;
+        let resp_tsig = stub_tsig.set_mac(
+            self.signer
+                .sign(&tbs_tsig_encoded)
+                .map_err(|e| ProtoError::from(e.to_string()))?,
+        );
+
+        Ok(MessageSignature::Tsig(make_tsig_record(
+            self.signer.signer_name().clone(),
+            resp_tsig,
+        )))
     }
 }
 

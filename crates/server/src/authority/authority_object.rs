@@ -13,9 +13,10 @@ use tracing::debug;
 use crate::{authority::Nsec3QueryInfo, dnssec::NxProofKind, proto::dnssec::Proof};
 use crate::{
     authority::{
-        Authority, AxfrPolicy, LookupControlFlow, LookupError, LookupOptions, ResponseSigner,
-        UpdateResult, ZoneType,
+        Authority, AxfrPolicy, LookupControlFlow, LookupError, LookupOptions, UpdateResult,
+        ZoneType,
     },
+    proto::op::message::ResponseSigner,
     proto::rr::{LowerName, Record, RecordType},
     server::Request,
 };
@@ -33,7 +34,10 @@ pub trait AuthorityObject: Send + Sync {
     fn can_validate_dnssec(&self) -> bool;
 
     /// Perform a dynamic update of a zone
-    async fn update(&self, update: &Request) -> (UpdateResult<bool>, Option<ResponseSigner>);
+    async fn update(
+        &self,
+        update: &Request,
+    ) -> (UpdateResult<bool>, Option<Box<dyn ResponseSigner>>);
 
     /// Get the origin of this zone, i.e. example.com is the origin for www.example.com
     fn origin(&self) -> &LowerName;
@@ -97,7 +101,7 @@ pub trait AuthorityObject: Send + Sync {
         last_result: LookupControlFlow<Box<dyn LookupObject>>,
     ) -> (
         LookupControlFlow<Box<dyn LookupObject>>,
-        Option<ResponseSigner>,
+        Option<Box<dyn ResponseSigner>>,
     );
 
     /// Using the specified query, perform a lookup against this zone.
@@ -119,7 +123,7 @@ pub trait AuthorityObject: Send + Sync {
         lookup_options: LookupOptions,
     ) -> (
         LookupControlFlow<Box<dyn LookupObject>>,
-        Option<ResponseSigner>,
+        Option<Box<dyn ResponseSigner>>,
     );
 
     /// Get the NS, NameServer, record for the zone
@@ -196,7 +200,10 @@ where
     }
 
     /// Perform a dynamic update of a zone
-    async fn update(&self, update: &Request) -> (UpdateResult<bool>, Option<ResponseSigner>) {
+    async fn update(
+        &self,
+        update: &Request,
+    ) -> (UpdateResult<bool>, Option<Box<dyn ResponseSigner>>) {
         Authority::update(self, update).await
     }
 
@@ -268,7 +275,7 @@ where
         last_result: LookupControlFlow<Box<dyn LookupObject>>,
     ) -> (
         LookupControlFlow<Box<dyn LookupObject>>,
-        Option<ResponseSigner>,
+        Option<Box<dyn ResponseSigner>>,
     ) {
         Authority::consult(self, name, rtype, lookup_options, last_result).await
     }
@@ -292,7 +299,7 @@ where
         lookup_options: LookupOptions,
     ) -> (
         LookupControlFlow<Box<dyn LookupObject>>,
-        Option<ResponseSigner>,
+        Option<Box<dyn ResponseSigner>>,
     ) {
         let request_info = match request.request_info() {
             Ok(info) => info,

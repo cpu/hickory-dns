@@ -13,8 +13,7 @@ use std::fmt;
 
 use crate::{
     authority::{LookupError, LookupObject, UpdateResult, ZoneType},
-    proto::ProtoError,
-    proto::op::MessageSignature,
+    proto::op::message::ResponseSigner,
     proto::rr::{LowerName, RecordSet, RecordType, RrsetRecords},
     server::Request,
 };
@@ -22,6 +21,7 @@ use crate::{
 use crate::{
     dnssec::NxProofKind,
     proto::{
+        ProtoError,
         dnssec::{DnsSecResult, Nsec3HashAlgorithm, SigSigner, crypto::Digest, rdata::key::KEY},
         rr::Name,
     },
@@ -87,7 +87,10 @@ pub trait Authority: Send + Sync {
     }
 
     /// Perform a dynamic update of a zone
-    async fn update(&self, update: &Request) -> (UpdateResult<bool>, Option<ResponseSigner>);
+    async fn update(
+        &self,
+        update: &Request,
+    ) -> (UpdateResult<bool>, Option<Box<dyn ResponseSigner>>);
 
     /// Get the origin of this zone, i.e. example.com is the origin for www.example.com
     fn origin(&self) -> &LowerName;
@@ -151,7 +154,7 @@ pub trait Authority: Send + Sync {
         last_result: LookupControlFlow<Box<dyn LookupObject>>,
     ) -> (
         LookupControlFlow<Box<dyn LookupObject>>,
-        Option<ResponseSigner>,
+        Option<Box<dyn ResponseSigner>>,
     ) {
         (last_result, None)
     }
@@ -173,7 +176,10 @@ pub trait Authority: Send + Sync {
         &self,
         request: &Request,
         lookup_options: LookupOptions,
-    ) -> (LookupControlFlow<Self::Lookup>, Option<ResponseSigner>);
+    ) -> (
+        LookupControlFlow<Self::Lookup>,
+        Option<Box<dyn ResponseSigner>>,
+    );
 
     /// Get the NS, NameServer, record for the zone
     async fn ns(&self, lookup_options: LookupOptions) -> LookupControlFlow<Self::Lookup> {
@@ -464,7 +470,3 @@ impl Nsec3QueryInfo<'_> {
         Ok(LowerName::new(&zone.prepend_label(label)?))
     }
 }
-
-/// A `ResponseSigner` takes a serialized response and produces a `MessageSignature` for it
-pub type ResponseSigner =
-    Box<dyn FnOnce(&[u8]) -> Result<MessageSignature, ProtoError> + Send + Sync>;

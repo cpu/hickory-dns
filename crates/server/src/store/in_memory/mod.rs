@@ -19,10 +19,11 @@ use tracing::warn;
 use crate::{
     authority::{
         AnyRecords, AuthLookup, Authority, AxfrPolicy, LookupControlFlow, LookupError,
-        LookupOptions, LookupRecords, ResponseSigner, UpdateResult, ZoneType,
+        LookupOptions, LookupRecords, UpdateResult, ZoneType,
     },
     proto::{
         op::ResponseCode,
+        op::message::ResponseSigner,
         rr::{DNSClass, LowerName, Name, RData, Record, RecordSet, RecordType, RrKey, rdata::SOA},
     },
     server::Request,
@@ -379,7 +380,10 @@ impl Authority for InMemoryAuthority {
     ///
     /// true if any of additions, updates or deletes were made to the zone, false otherwise. Err is
     ///  returned in the case of bad data, etc.
-    async fn update(&self, _update: &Request) -> (UpdateResult<bool>, Option<ResponseSigner>) {
+    async fn update(
+        &self,
+        _update: &Request,
+    ) -> (UpdateResult<bool>, Option<Box<dyn ResponseSigner>>) {
         (Err(ResponseCode::NotImp), None)
     }
 
@@ -573,7 +577,10 @@ impl Authority for InMemoryAuthority {
         &self,
         request: &Request,
         lookup_options: LookupOptions,
-    ) -> (LookupControlFlow<Self::Lookup>, Option<ResponseSigner>) {
+    ) -> (
+        LookupControlFlow<Self::Lookup>,
+        Option<Box<dyn ResponseSigner>>,
+    ) {
         let request_info = match request.request_info() {
             Ok(info) => info,
             Err(e) => return (LookupControlFlow::Break(Err(LookupError::from(e))), None),

@@ -3,6 +3,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use hickory_integration::TestResponseHandler;
 use hickory_proto::{
+    op::message::ResponseSigner,
     op::{Message, MessageType, Query, ResponseCode},
     rr::{LowerName, Name, RData, Record, RecordSet, RecordType, rdata::A},
     serialize::binary::{BinDecodable, BinEncodable},
@@ -13,7 +14,7 @@ use hickory_server::{authority::Nsec3QueryInfo, dnssec::NxProofKind};
 use hickory_server::{
     authority::{
         Authority, AxfrPolicy, Catalog, LookupControlFlow, LookupError, LookupObject,
-        LookupOptions, LookupRecords, MessageRequest, ResponseSigner, UpdateResult, ZoneType,
+        LookupOptions, LookupRecords, MessageRequest, UpdateResult, ZoneType,
     },
     server::{Request, ResponseInfo},
 };
@@ -187,7 +188,10 @@ impl Authority for TestAuthority {
         AxfrPolicy::Deny
     }
 
-    async fn update(&self, _update: &Request) -> (UpdateResult<bool>, Option<ResponseSigner>) {
+    async fn update(
+        &self,
+        _update: &Request,
+    ) -> (UpdateResult<bool>, Option<Box<dyn ResponseSigner>>) {
         (Err(ResponseCode::NotImp), None)
     }
 
@@ -229,7 +233,10 @@ impl Authority for TestAuthority {
         &self,
         request: &Request,
         lookup_options: LookupOptions,
-    ) -> (LookupControlFlow<Self::Lookup>, Option<ResponseSigner>) {
+    ) -> (
+        LookupControlFlow<Self::Lookup>,
+        Option<Box<dyn ResponseSigner>>,
+    ) {
         let request_info = match request.request_info() {
             Ok(info) => info,
             Err(e) => return (LookupControlFlow::Break(Err(LookupError::from(e))), None),
@@ -253,7 +260,7 @@ impl Authority for TestAuthority {
         last_result: LookupControlFlow<Box<dyn LookupObject>>,
     ) -> (
         LookupControlFlow<Box<dyn LookupObject>>,
-        Option<ResponseSigner>,
+        Option<Box<dyn ResponseSigner>>,
     ) {
         let Some(res) = inner_lookup(name, &self.consult_records, &lookup_options) else {
             return (last_result, None);

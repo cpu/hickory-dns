@@ -293,7 +293,7 @@ impl Catalog {
                         tbs_response.set_edns(resp_edns);
                     }
                     tbs_response.destructive_emit(&mut encoder)?;
-                    response.set_signature(signer(&tbs_response_buf)?);
+                    response.set_signature(signer.sign(&tbs_response_buf)?);
                 }
 
                 return send_response(response_edns, response, response_handle).await;
@@ -499,7 +499,7 @@ async fn lookup<R: ResponseHandler + Unpin>(
                 tbs_response.set_edns(resp_edns);
             }
             tbs_response.destructive_emit(&mut encoder)?;
-            message_response.set_signature(signer(&tbs_response_buf)?);
+            message_response.set_signature(signer.sign(&tbs_response_buf)?);
         }
 
         let result = send_response(response_edns, message_response, response_handle).await;

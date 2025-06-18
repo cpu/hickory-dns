@@ -28,9 +28,10 @@ use crate::{authority::Nsec3QueryInfo, dnssec::NxProofKind};
 use crate::{
     authority::{
         Authority, AxfrPolicy, LookupControlFlow, LookupError, LookupObject, LookupOptions,
-        ResponseSigner, UpdateResult, ZoneType,
+        UpdateResult, ZoneType,
     },
     proto::{
+        op::message::ResponseSigner,
         op::{Query, ResponseCode},
         rr::{
             LowerName, Name, RData, Record, RecordType,
@@ -328,7 +329,10 @@ impl Authority for BlocklistAuthority {
         AxfrPolicy::Deny
     }
 
-    async fn update(&self, _update: &Request) -> (UpdateResult<bool>, Option<ResponseSigner>) {
+    async fn update(
+        &self,
+        _update: &Request,
+    ) -> (UpdateResult<bool>, Option<Box<dyn ResponseSigner>>) {
         (Err(ResponseCode::NotImp), None)
     }
 
@@ -366,7 +370,7 @@ impl Authority for BlocklistAuthority {
         last_result: LookupControlFlow<Box<dyn LookupObject>>,
     ) -> (
         LookupControlFlow<Box<dyn LookupObject>>,
-        Option<ResponseSigner>,
+        Option<Box<dyn ResponseSigner>>,
     ) {
         match self.consult_action {
             BlocklistConsultAction::Disabled => return (last_result, None),
@@ -389,7 +393,10 @@ impl Authority for BlocklistAuthority {
         &self,
         request: &Request,
         lookup_options: LookupOptions,
-    ) -> (LookupControlFlow<Self::Lookup>, Option<ResponseSigner>) {
+    ) -> (
+        LookupControlFlow<Self::Lookup>,
+        Option<Box<dyn ResponseSigner>>,
+    ) {
         let request_info = match request.request_info() {
             Ok(info) => info,
             Err(e) => return (LookupControlFlow::Break(Err(LookupError::from(e))), None),

@@ -20,11 +20,9 @@ use tracing::{debug, info};
 #[cfg(feature = "metrics")]
 use crate::store::metrics::StoreMetrics;
 use crate::{
-    authority::{
-        Authority, AxfrPolicy, LookupControlFlow, LookupOptions, ResponseSigner, UpdateResult,
-        ZoneType,
-    },
+    authority::{Authority, AxfrPolicy, LookupControlFlow, LookupOptions, UpdateResult, ZoneType},
     proto::{
+        op::message::ResponseSigner,
         rr::{LowerName, Name, RecordSet, RecordType, RrKey},
         serialize::txt::Parser,
     },
@@ -207,7 +205,10 @@ impl Authority for FileAuthority {
     }
 
     /// Perform a dynamic update of a zone
-    async fn update(&self, _update: &Request) -> (UpdateResult<bool>, Option<ResponseSigner>) {
+    async fn update(
+        &self,
+        _update: &Request,
+    ) -> (UpdateResult<bool>, Option<Box<dyn ResponseSigner>>) {
         use crate::proto::op::ResponseCode;
         (Err(ResponseCode::NotImp), None)
     }
@@ -261,7 +262,10 @@ impl Authority for FileAuthority {
         &self,
         request: &Request,
         lookup_options: LookupOptions,
-    ) -> (LookupControlFlow<Self::Lookup>, Option<ResponseSigner>) {
+    ) -> (
+        LookupControlFlow<Self::Lookup>,
+        Option<Box<dyn ResponseSigner>>,
+    ) {
         let (search, signer) = self.in_memory.search(request, lookup_options).await;
 
         #[cfg(feature = "metrics")]
