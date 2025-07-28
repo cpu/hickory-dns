@@ -30,6 +30,7 @@ pub enum Image {
         repo: Repository<'static>,
         dnssec_feature: HickoryDnssecFeature,
     },
+    Pdns,
     Unbound,
     EdeDotCom,
 }
@@ -48,6 +49,7 @@ impl Image {
             Self::Dnslib => include_str!("docker/dnslib.Dockerfile"),
             Self::Client => include_str!("docker/client.Dockerfile"),
             Self::Hickory { .. } => include_str!("docker/hickory.Dockerfile"),
+            Self::Pdns => include_str!("docker/pdns.Dockerfile"),
             Self::Unbound => include_str!("docker/unbound.Dockerfile"),
             Self::EdeDotCom => include_str!("docker/ede-dot-com/Dockerfile"),
         }
@@ -73,6 +75,11 @@ impl Image {
             Self::Hickory { .. } => {
                 static HICKORY_ONCE: Once = Once::new();
                 &HICKORY_ONCE
+            }
+
+            Self::Pdns => {
+                static PDNS_ONCE: Once = Once::new();
+                &PDNS_ONCE
             }
 
             Self::Unbound => {
@@ -102,6 +109,7 @@ impl From<Implementation> for Image {
                 dnssec_feature,
             },
             Implementation::EdeDotCom => Self::EdeDotCom,
+            Implementation::Pdns => Self::Pdns,
         }
     }
 }
@@ -113,6 +121,7 @@ impl fmt::Display for Image {
             Self::Bind => f.write_str("bind"),
             Self::Dnslib => f.write_str("dnslib"),
             Self::Hickory { dnssec_feature, .. } => write!(f, "hickory-{dnssec_feature}"),
+            Self::Pdns => f.write_str("pdns"),
             Self::Unbound => f.write_str("unbound"),
             Self::EdeDotCom => f.write_str("ede-dot-com"),
         }
@@ -161,6 +170,7 @@ impl Container {
                             dnssec_feature: HickoryDnssecFeature::Ring,
                             ..
                         } => "hickory-dnssec-ring",
+                        Image::Pdns => "pdns",
                         Image::Unbound => "unbound",
                         Image::EdeDotCom => "ede-dot-com",
                     };
