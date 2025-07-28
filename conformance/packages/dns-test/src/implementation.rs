@@ -207,10 +207,10 @@ impl Implementation {
                     )
                 }
 
-                Self::Pdns => {
-                    // PowerDNS Recursor doesn't act as authoritative name server
-                    unreachable!("PowerDNS Recursor doesn't support name server role")
-                }
+                Self::Pdns => minijinja::render!(
+                    include_str!("templates/pdns-auth.conf.jinja"),
+                    use_dnssec => use_dnssec,
+                ),
 
                 Self::EdeDotCom => include_str!("templates/named.ede-dot-com.conf").into(),
             },
@@ -266,7 +266,7 @@ impl Implementation {
 
             Self::Pdns => match role {
                 Role::Resolver | Role::Forwarder => Some("/etc/powerdns/recursor.yml"),
-                Role::NameServer => None, // PowerDNS Recursor doesn't act as authoritative
+                Role::NameServer => Some("/etc/powerdns/pdns.conf"),
             },
 
             Self::Unbound => match role {
@@ -287,7 +287,7 @@ impl Implementation {
                 Role::Resolver | Role::Forwarder => {
                     "pdns_recursor --daemon=no --config-dir=/etc/powerdns --loglevel=9"
                 }
-                Role::NameServer => unreachable!("PowerDNS Recursor doesn't act as authoritative"),
+                Role::NameServer => "pdns_server --daemon=no --config-dir=/etc/powerdns",
             },
             Implementation::Unbound => match role {
                 Role::NameServer => "nsd -d",

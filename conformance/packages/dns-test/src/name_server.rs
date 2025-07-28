@@ -358,6 +358,18 @@ impl NameServer<Stopped> {
             )?;
         }
 
+        // PowerDNS auth server needs an additional zones configuration file
+        if let Implementation::Pdns = implementation {
+            if matches!(config.role(), Role::NameServer) {
+                let zones_config = minijinja::render!(
+                    include_str!("templates/pdns-zones.conf.jinja"),
+                    fqdn => zone_file.origin().as_str(),
+                    additional_zones => additional_zones.keys().map(|x| x.as_str()).collect::<Vec<&str>>(),
+                );
+                container.cp("/etc/powerdns/zones.conf", &zones_config)?;
+            }
+        }
+
         container.status_ok(&["mkdir", "-p", ZONES_DIR])?;
         container.cp(&zone_file_path(), &zone_file.to_string())?;
 
