@@ -33,7 +33,7 @@ $ cargo run --example explore
 By default, this will use `unbound` as the resolver. You can switch the resolver to `hickory-dns` using the `DNS_TEST_SUBJECT` environment variable:
 
 ``` shell
-$ DNS_TEST_SUBJECT="hickory https://github.com/hickory-dns/hickory-dns dnssec-aws-lc-rs" cargo run --example explore
+$ DNS_TEST_SUBJECT="hickory https://github.com/hickory-dns/hickory-dns aws-lc-rs" cargo run --example explore
 ```
 
 ### Environment variables
@@ -41,7 +41,7 @@ $ DNS_TEST_SUBJECT="hickory https://github.com/hickory-dns/hickory-dns dnssec-aw
 - `DNS_TEST_SUBJECT`. This variable controls what the `dns_test::subject` function returns. The variable can contain one of these values:
   - `unbound`
   - `bind`
-  - `hickory $REPOSITORY $DNSSEC_FEATURE`. where `$REPOSITORY` is a placeholder for a git repository, and `$DNSSEC_FEATURE` is `dnssec-ring` or `dnssec-aws-lc-rs`. Examples values for `$REPOSITORY`: `https://github.com/hickory-dns/hickory-dns`; `/home/user/git-repos/hickory-dns`. NOTE: when using a local repository, changes that have not been committed, regardless of whether they are staged or not, will **not** be included in the `hickory-dns` build.
+  - `hickory $REPOSITORY $CRYPTO_PROVIDER`. where `$REPOSITORY` is a placeholder for a git repository, and `$CRYPTO_PROVIDER` is `ring` or `aws-lc-rs`. Examples values for `$REPOSITORY`: `https://github.com/hickory-dns/hickory-dns`; `/home/user/git-repos/hickory-dns`. NOTE: when using a local repository, changes that have not been committed, regardless of whether they are staged or not, will **not** be included in the `hickory-dns` build.
   
 - `DNS_TEST_VERBOSE_DOCKER_BUILD`. Setting this variable prints the output of the `docker build` invocations that the framework does to the console. This is useful to verify that image caching is working; for example if you set `DNS_TEST_SUBJECT` to a local `hickory-dns` repository then consecutively running the `explore` example and/or `conformance-tests` test suite **must** not rebuild `hickory-dns` provided that you have not *committed* any new change to the local repository.
 
@@ -123,7 +123,7 @@ $ cargo test -p conformance-tests -- --include-ignored
 To run the conformance tests against `hickory-dns` run:
 
 ``` console
-$ DNS_TEST_SUBJECT="hickory /path/to/repository dnssec-aws-lc-rs" cargo test -p conformance-tests
+$ DNS_TEST_SUBJECT="hickory /path/to/repository aws-lc-rs" cargo test -p conformance-tests
 ```
 
 ### Test organization
