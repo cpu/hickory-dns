@@ -17,10 +17,10 @@ RUN cargo chef prepare
 FROM chef AS builder
 COPY --from=planner /usr/src/hickory/recipe.json /usr/src/hickory/recipe.json
 WORKDIR /usr/src/hickory
-RUN cargo chef cook -p hickory-dns --bin hickory-dns --features recursor,dnssec-$CRYPTO_PROVIDER && \
+RUN cargo chef cook -p hickory-dns --bin hickory-dns --features recursor,dnssec-$CRYPTO_PROVIDER,tls-$CRYPTO_PROVIDER && \
     cargo chef cook -p hickory-util --bin dns --features h3-$CRYPTO_PROVIDER,https-$CRYPTO_PROVIDER
 COPY ./src /usr/src/hickory
-RUN cargo build -p hickory-dns --bin hickory-dns --features recursor,dnssec-$CRYPTO_PROVIDER && \
+RUN cargo build -p hickory-dns --bin hickory-dns --features recursor,dnssec-$CRYPTO_PROVIDER,tls-$CRYPTO_PROVIDER && \
     cargo build -p hickory-util --bin dns --features h3-$CRYPTO_PROVIDER,https-$CRYPTO_PROVIDER
 
 FROM debian:bookworm-slim AS final
