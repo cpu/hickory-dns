@@ -182,7 +182,7 @@ impl<P: ConnectionProvider> PoolState<P> {
             let mut requests = par_servers
                 .into_iter()
                 .map(|server| {
-                    let future = server.send(request.clone(), protocol_prefs.udp_excluded());
+                    let future = server.send(request.clone(), protocol_prefs);
                     async { (server, future.await) }
                 })
                 .collect::<FuturesUnordered<_>>();

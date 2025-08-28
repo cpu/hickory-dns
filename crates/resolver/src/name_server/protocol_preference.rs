@@ -38,9 +38,4 @@ impl ProtocolPreference {
     pub(crate) fn exclude_udp(&mut self) {
         self.exclude_udp = true;
     }
-
-    /// Return whether UDP is excluded
-    pub(crate) fn udp_excluded(&self) -> bool {
-        self.exclude_udp
-    }
 }
