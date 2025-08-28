@@ -7,6 +7,7 @@
 
 use std::cmp::Ordering;
 use std::collections::VecDeque;
+use std::iter;
 use std::pin::Pin;
 use std::sync::{
     Arc,
@@ -154,16 +155,16 @@ impl<P: ConnectionProvider> PoolState<P> {
 
         loop {
             // construct the parallel requests, 2 is the default
-            let mut par_servers = SmallVec::<[NameServer<P>; 2]>::new();
-            while !servers.is_empty()
-                && par_servers.len() < Ord::max(self.options.num_concurrent_reqs, 1)
-            {
-                if let Some(server) = servers.pop_front() {
+            let par_servers = iter::from_fn(|| {
+                while let Some(server) = servers.pop_front() {
                     if protocol_prefs.allows_server(&server) {
-                        par_servers.push(server);
+                        return Some(server);
                     }
                 }
-            }
+                None
+            })
+            .take(self.options.num_concurrent_reqs.max(1))
+            .collect::<SmallVec<[_; 2]>>();
 
             if par_servers.is_empty() {
                 if !busy.is_empty() && backoff < Duration::from_millis(300) {
@@ -171,10 +172,7 @@ impl<P: ConnectionProvider> PoolState<P> {
                     backoff,
                 )
                 .await;
-                    servers.extend(
-                        busy.drain(..)
-                            .filter(|ns| protocol_prefs.allows_server(ns)),
-                    );
+                    servers.extend(busy.drain(..).filter(|ns| protocol_prefs.allows_server(ns)));
                     backoff *= 2;
                     continue;
                 }
