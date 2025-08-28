@@ -5,7 +5,6 @@
 // https://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 
-use std::cmp;
 use std::fmt::{self, Debug, Formatter};
 use std::future::Future;
 use std::sync::Arc;
@@ -243,18 +242,9 @@ impl<P: ConnectionProvider> NameServerState<P> {
     ) -> Result<(P::Conn, Arc<ConnectionMeta>), ProtoError> {
         let mut connections = self.connections.lock().await;
         connections.retain(|conn| matches!(conn.meta.status(), Status::Init | Status::Established));
-        if !connections.is_empty() {
-            connections.sort_by(|a, b| match (a.protocol, b.protocol) {
-                (ap, bp) if ap == bp => a.meta.srtt.current().total_cmp(&b.meta.srtt.current()),
-                (Protocol::Udp, _) => cmp::Ordering::Less,
-                (_, Protocol::Udp) => cmp::Ordering::Greater,
-                (_, _) => a.meta.srtt.current().total_cmp(&b.meta.srtt.current()),
-            });
 
-            let conn = connections.first().unwrap(); // safe to unwrap because we only get here if `connections` is not empty
-            if protocol_preference.allows_protocol(conn.protocol) {
-                return Ok((conn.handle.clone(), conn.meta.clone()));
-            }
+        if let Some(conn) = protocol_preference.select_connection(&connections) {
+            return Ok((conn.handle.clone(), conn.meta.clone()));
         }
 
         debug!(config = ?self.config, "connecting");
@@ -286,15 +276,15 @@ impl<P: ConnectionProvider> NameServerState<P> {
     }
 }
 
-struct ConnectionState<P: ConnectionProvider> {
-    protocol: Protocol,
-    handle: P::Conn,
-    meta: Arc<ConnectionMeta>,
+pub(crate) struct ConnectionState<P: ConnectionProvider> {
+    pub(crate) protocol: Protocol,
+    pub(crate) handle: P::Conn,
+    pub(crate) meta: Arc<ConnectionMeta>,
 }
 
-struct ConnectionMeta {
+pub(crate) struct ConnectionMeta {
     status: AtomicU8,
-    srtt: DecayingSrtt,
+    pub(crate) srtt: DecayingSrtt,
 }
 
 impl ConnectionMeta {
@@ -319,7 +309,7 @@ impl Default for ConnectionMeta {
     }
 }
 
-struct DecayingSrtt {
+pub(crate) struct DecayingSrtt {
     /// The smoothed round-trip time (SRTT).
     ///
     /// This value represents an exponentially weighted moving average (EWMA) of
@@ -398,7 +388,7 @@ impl DecayingSrtt {
     /// 1. It helps distribute query load.
     /// 2. It helps detect positive network changes. For example, decreases in
     ///    latency or a server that has recovered from a failure.
-    fn current(&self) -> f64 {
+    pub(crate) fn current(&self) -> f64 {
         let srtt = f64::from(self.srtt_microseconds.load(Ordering::Acquire));
         self.last_update.lock().map_or(srtt, |last_update| {
             // In general, if the time between queries is relatively short, then

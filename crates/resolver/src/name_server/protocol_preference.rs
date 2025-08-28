@@ -5,10 +5,12 @@
 // https://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 
+use std::cmp::Ordering;
+
 use hickory_proto::xfer::Protocol;
 
 use crate::name_server::connection_provider::ConnectionProvider;
-use crate::name_server::name_server::NameServer;
+use crate::name_server::name_server::{ConnectionState, NameServer};
 
 /// Manages protocol selection preferences and exclusions for DNS queries.
 ///
@@ -37,5 +39,32 @@ impl ProtocolPreference {
     /// we believe may have been spoofed (e.g. due to 0x20 query case randomization mismatch).
     pub(crate) fn exclude_udp(&mut self) {
         self.exclude_udp = true;
+    }
+
+    /// Select the best pre-existing connection to use.
+    ///
+    /// This choice is made based on protocol preference, and the SRTT performance metrics.
+    pub(crate) fn select_connection<'a, P: ConnectionProvider>(
+        &self,
+        connections: &'a [ConnectionState<P>],
+    ) -> Option<&'a ConnectionState<P>> {
+        connections
+            .iter()
+            .filter(|conn| self.allows_protocol(conn.protocol))
+            .min_by(|a, b| self.compare_connections(a, b))
+    }
+
+    /// Compare two connections according to protocol preferences and performance.
+    fn compare_connections<P: ConnectionProvider>(
+        &self,
+        a: &ConnectionState<P>,
+        b: &ConnectionState<P>,
+    ) -> Ordering {
+        match (a.protocol, b.protocol) {
+            (ap, bp) if ap == bp => a.meta.srtt.current().total_cmp(&b.meta.srtt.current()),
+            (Protocol::Udp, _) => Ordering::Less,
+            (_, Protocol::Udp) => Ordering::Greater,
+            _ => a.meta.srtt.current().total_cmp(&b.meta.srtt.current()),
+        }
     }
 }
