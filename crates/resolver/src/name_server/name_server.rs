@@ -248,11 +248,8 @@ impl<P: ConnectionProvider> NameServerState<P> {
         }
 
         debug!(config = ?self.config, "connecting");
-        let config = self
-            .config
-            .connections
-            .iter()
-            .find(|conn| protocol_preference.allows_protocol(conn.protocol.to_protocol()))
+        let config = protocol_preference
+            .select_connection_config(&self.config.connections)
             .ok_or_else(|| ProtoError::from(ProtoErrorKind::NoConnections))?;
 
         let conn = Box::pin(self.connection_provider.new_connection(

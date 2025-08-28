@@ -7,10 +7,10 @@
 
 use std::cmp::Ordering;
 
-use hickory_proto::xfer::Protocol;
-
+use crate::config::ConnectionConfig;
 use crate::name_server::connection_provider::ConnectionProvider;
 use crate::name_server::name_server::{ConnectionState, NameServer};
+use hickory_proto::xfer::Protocol;
 
 /// Manages protocol selection preferences and exclusions for DNS queries.
 ///
@@ -52,6 +52,15 @@ impl ProtocolPreference {
             .iter()
             .filter(|conn| self.allows_protocol(conn.protocol))
             .min_by(|a, b| self.compare_connections(a, b))
+    }
+
+    pub(crate) fn select_connection_config<'a>(
+        &self,
+        connection_config: &'a [ConnectionConfig],
+    ) -> Option<&'a ConnectionConfig> {
+        connection_config
+            .iter()
+            .find(|c| self.allows_protocol(c.protocol.to_protocol()))
     }
 
     /// Compare two connections according to protocol preferences and performance.
