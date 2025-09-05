@@ -5,6 +5,7 @@
 // https://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 
+use std::collections::HashSet;
 use std::future::Future;
 use std::io;
 use std::marker::Unpin;
@@ -12,9 +13,9 @@ use std::net::{IpAddr, SocketAddr};
 #[cfg(feature = "__quic")]
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::pin::Pin;
-#[cfg(any(feature = "__tls", feature = "__https"))]
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use std::time::Duration;
 
 use futures_util::future::FutureExt;
 use futures_util::ready;
@@ -55,7 +56,7 @@ pub trait ConnectionProvider: 'static + Clone + Send + Sync + Unpin {
         &self,
         ip: IpAddr,
         config: &ConnectionConfig,
-        options: &ResolverOpts,
+        options: &ConnectionOptions,
         tls: &TlsConfig,
     ) -> Result<Self::FutureConn, io::Error>;
 }
@@ -120,7 +121,7 @@ impl<P: RuntimeProvider> ConnectionProvider for P {
         &self,
         ip: IpAddr,
         config: &ConnectionConfig,
-        options: &ResolverOpts,
+        options: &ConnectionOptions,
         #[cfg_attr(not(feature = "__tls"), allow(unused_variables))] tls: &TlsConfig,
     ) -> Result<Self::FutureConn, io::Error> {
         let remote_addr = SocketAddr::new(ip, config.port);
@@ -267,6 +268,49 @@ impl TlsConfig {
             #[cfg(feature = "__tls")]
             config: client_config()?,
         })
+    }
+}
+
+/// Connection options for creating a new connection with a connection provider.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ConnectionOptions {
+    /// The timeout for connecting, and for DNS requests.
+    /// Defaults to 5 seconds.
+    pub timeout: Duration,
+
+    /// Request UDP bind ephemeral ports directly from the OS
+    ///
+    /// Boolean parameter to specify whether to use the operating system's standard UDP port
+    /// selection logic instead of Hickory's logic to securely select a random source port. We do
+    /// not recommend using this option unless absolutely necessary, as the operating system may
+    /// select ephemeral ports from a smaller range than Hickory, which can make response poisoning
+    /// attacks easier to conduct. Some operating systems (notably, Windows) might display a
+    /// user-prompt to allow a Hickory-specified port to be used, and setting this option will
+    /// prevent those prompts from being displayed. If os_port_selection is true, avoid_local_udp_ports
+    /// will be ignored.
+    pub os_port_selection: bool,
+
+    /// Local UDP ports to avoid when making outgoing queries
+    pub avoid_local_udp_ports: Arc<HashSet<u16>>,
+}
+
+impl Default for ConnectionOptions {
+    fn default() -> Self {
+        Self {
+            timeout: Duration::from_secs(5),
+            os_port_selection: false,
+            avoid_local_udp_ports: Arc::new(HashSet::default()),
+        }
+    }
+}
+
+impl From<&ResolverOpts> for ConnectionOptions {
+    fn from(opts: &ResolverOpts) -> Self {
+        Self {
+            timeout: opts.timeout,
+            os_port_selection: opts.os_port_selection,
+            avoid_local_udp_ports: opts.avoid_local_udp_ports.clone(),
+        }
     }
 }
 
