@@ -24,9 +24,7 @@ use crate::config::{ResolveHosts, ResolverConfig, ResolverOpts};
 use crate::hosts::Hosts;
 use crate::lookup::{Lookup, TypedLookup};
 use crate::lookup_ip::{LookupIp, LookupIpFuture};
-use crate::name_server::{
-    ConnectionProvider, NameServerOptions, NameServerPool, TlsConfig,
-};
+use crate::name_server::{ConnectionProvider, NameServerOptions, NameServerPool, TlsConfig};
 #[cfg(feature = "__dnssec")]
 use crate::proto::dnssec::{DnssecDnsHandle, TrustAnchors};
 use crate::proto::op::{DnsRequest, DnsRequestOptions, DnsResponse, Query};
