@@ -110,7 +110,7 @@ impl<P: ConnectionProvider> RecursorDnsHandle<P> {
         let mut deny_server_v4 = PrefixSet::new();
         let mut deny_server_v6 = PrefixSet::new();
 
-        for network in deny_server {
+        for network in deny_servers {
             info!("adding {network} to the do not query list");
             match network {
                 IpNet::V4(network) => {
@@ -125,7 +125,7 @@ impl<P: ConnectionProvider> RecursorDnsHandle<P> {
         let mut allow_server_v4 = PrefixSet::new();
         let mut allow_server_v6 = PrefixSet::new();
 
-        for network in allow_server {
+        for network in allow_servers {
             info!("adding {network} to the do not query override list");
             match network {
                 IpNet::V4(network) => {
