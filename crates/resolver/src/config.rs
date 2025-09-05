@@ -442,7 +442,7 @@ impl ProtocolConfig {
 #[cfg_attr(
     feature = "serde",
     derive(Serialize, Deserialize),
-    serde(default, deny_unknown_fields)
+    serde(default)
 )]
 #[allow(missing_copy_implementations)]
 #[non_exhaustive]
