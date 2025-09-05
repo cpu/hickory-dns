@@ -20,7 +20,7 @@ use tokio::time::{Duration, Instant};
 use tracing::debug;
 
 use crate::config::{NameServerConfig, ProtocolConfig, ResolverOpts, ServerOrderingStrategy};
-use crate::name_server::connection_provider::{ConnectionProvider, TlsConfig};
+use crate::name_server::connection_provider::{ConnectionOptions, ConnectionProvider, TlsConfig};
 use crate::proto::{
     DnsError, NoRecords, ProtoError, ProtoErrorKind,
     op::{DnsRequest, DnsResponse, ResponseCode},
@@ -259,7 +259,7 @@ impl<P: ConnectionProvider> NameServerState<P> {
         let handle = Box::pin(self.connection_provider.new_connection(
             self.config.ip,
             config,
-            &self.options,
+            &ConnectionOptions::from(&*self.options),
             &self.tls,
         )?)
         .await?;
