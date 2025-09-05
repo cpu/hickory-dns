@@ -17,7 +17,6 @@ use std::net::{IpAddr, SocketAddr};
 #[cfg(feature = "__quic")]
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::pin::Pin;
-#[cfg(any(feature = "__tls", feature = "__https"))]
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
@@ -291,6 +290,16 @@ pub struct ConnectionOptions {
 
     /// Local UDP ports to avoid when making outgoing queries
     pub avoid_local_udp_ports: Arc<HashSet<u16>>,
+}
+
+impl Default for ConnectionOptions {
+    fn default() -> Self {
+        Self {
+            timeout: Duration::from_secs(5),
+            os_port_selection: false,
+            avoid_local_udp_ports: Arc::new(HashSet::default()),
+        }
+    }
 }
 
 impl From<&ResolverOpts> for ConnectionOptions {

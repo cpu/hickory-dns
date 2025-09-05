@@ -24,8 +24,9 @@ use crate::config::{ResolveHosts, ResolverConfig, ResolverOpts};
 use crate::hosts::Hosts;
 use crate::lookup::{Lookup, TypedLookup};
 use crate::lookup_ip::{LookupIp, LookupIpFuture};
-use crate::name_server::TlsConfig;
-use crate::name_server::{ConnectionProvider, NameServerPool};
+use crate::name_server::{
+    ConnectionOptions, ConnectionProvider, NameServerOptions, NameServerPool, TlsConfig,
+};
 #[cfg(feature = "__dnssec")]
 use crate::proto::dnssec::{DnssecDnsHandle, TrustAnchors};
 use crate::proto::op::{DnsRequest, DnsRequestOptions, DnsResponse, Query};
@@ -456,10 +457,17 @@ impl<P: ConnectionProvider> ResolverBuilder<P> {
             options.validate = true;
         }
 
-        let options = Arc::new(options);
         let pool = NameServerPool::from_config_with_provider(
             &config,
-            options.clone(),
+            Arc::new(NameServerOptions {
+                num_concurrent_reqs: options.num_concurrent_reqs,
+                server_ordering_strategy: options.server_ordering_strategy,
+                connection_options: Arc::new(ConnectionOptions {
+                    timeout: options.timeout,
+                    os_port_selection: options.os_port_selection,
+                    avoid_local_udp_ports: options.avoid_local_udp_ports.clone(),
+                }),
+            }),
             Arc::new(match tls {
                 Some(config) => config,
                 None => TlsConfig::new()?,
@@ -492,7 +500,7 @@ impl<P: ConnectionProvider> ResolverBuilder<P> {
 
         Ok(Resolver {
             config,
-            options,
+            options: Arc::new(options),
             client_cache,
             hosts,
         })

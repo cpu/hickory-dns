@@ -18,9 +18,9 @@ use futures_util::stream::{FuturesUnordered, Stream, StreamExt, once};
 use smallvec::SmallVec;
 use tracing::debug;
 
-use crate::config::{NameServerConfig, ResolverConfig, ResolverOpts, ServerOrderingStrategy};
+use crate::config::{NameServerConfig, ResolverConfig, ServerOrderingStrategy};
 use crate::name_server::connection_provider::{ConnectionProvider, TlsConfig};
-use crate::name_server::name_server::NameServer;
+use crate::name_server::name_server::{NameServer, NameServerOptions};
 use crate::proto::op::{DnsRequest, DnsResponse, ResponseCode};
 use crate::proto::runtime::{RuntimeProvider, Time};
 use crate::proto::xfer::{DnsHandle, Protocol};
@@ -35,7 +35,7 @@ pub struct NameServerPool<P: ConnectionProvider> {
 impl<P: ConnectionProvider> NameServerPool<P> {
     pub(crate) fn from_config_with_provider(
         config: &ResolverConfig,
-        options: Arc<ResolverOpts>,
+        options: Arc<NameServerOptions>,
         tls: Arc<TlsConfig>,
         conn_provider: P,
     ) -> Self {
@@ -50,7 +50,7 @@ impl<P: ConnectionProvider> NameServerPool<P> {
     /// Construct a NameServerPool from a set of name server configs
     pub fn from_config(
         name_servers: Vec<NameServerConfig>,
-        options: Arc<ResolverOpts>,
+        options: Arc<NameServerOptions>,
         tls: Arc<TlsConfig>,
         conn_provider: P,
     ) -> Self {
@@ -68,14 +68,14 @@ impl<P: ConnectionProvider> NameServerPool<P> {
     }
 
     #[doc(hidden)]
-    pub fn from_nameservers(servers: Vec<NameServer<P>>, options: Arc<ResolverOpts>) -> Self {
+    pub fn from_nameservers(servers: Vec<NameServer<P>>, options: Arc<NameServerOptions>) -> Self {
         Self {
             state: Arc::new(PoolState::new(servers, options)),
         }
     }
 
-    /// Returns the pool's options.
-    pub fn options(&self) -> &ResolverOpts {
+    /// Returns the pool's name server options.
+    pub fn options(&self) -> &NameServerOptions {
         &self.state.options
     }
 }
@@ -95,12 +95,12 @@ impl<P: ConnectionProvider> DnsHandle for NameServerPool<P> {
 
 struct PoolState<P: ConnectionProvider> {
     servers: Vec<NameServer<P>>,
-    options: Arc<ResolverOpts>,
+    options: Arc<NameServerOptions>,
     next: AtomicUsize,
 }
 
 impl<P: ConnectionProvider> PoolState<P> {
-    fn new(servers: Vec<NameServer<P>>, options: Arc<ResolverOpts>) -> Self {
+    fn new(servers: Vec<NameServer<P>>, options: Arc<NameServerOptions>) -> Self {
         Self {
             servers,
             options,
@@ -263,7 +263,7 @@ mod tests {
         let io_loop = Runtime::new().unwrap();
         let pool = NameServerPool::from_config_with_provider(
             &resolver_config,
-            Arc::new(ResolverOpts::default()),
+            Arc::new(NameServerOptions::default()),
             Arc::new(TlsConfig::new().unwrap()),
             TokioRuntimeProvider::new(),
         );
@@ -309,11 +309,8 @@ mod tests {
         subscribe();
 
         let conn_provider = TokioRuntimeProvider::default();
-        let opts = Arc::new(ResolverOpts {
-            try_tcp_on_error: true,
-            ..ResolverOpts::default()
-        });
 
+        let opts = Arc::new(NameServerOptions::default());
         let tcp = NameServerConfig::tcp(IpAddr::from([8, 8, 8, 8]));
         let name_server = NameServer::new(
             tcp,
