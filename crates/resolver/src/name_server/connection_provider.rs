@@ -22,7 +22,7 @@ use futures_util::ready;
 #[cfg(feature = "__tls")]
 use rustls::pki_types::ServerName;
 
-use crate::config::{ConnectionConfig, ProtocolConfig, ResolverOpts};
+use crate::config::{ConnectionConfig, ProtocolConfig};
 #[cfg(feature = "__https")]
 use crate::proto::h2::HttpsClientConnect;
 #[cfg(feature = "__h3")]
@@ -300,16 +300,6 @@ impl Default for ConnectionOptions {
             timeout: Duration::from_secs(5),
             os_port_selection: false,
             avoid_local_udp_ports: Arc::new(HashSet::default()),
-        }
-    }
-}
-
-impl From<&ResolverOpts> for ConnectionOptions {
-    fn from(opts: &ResolverOpts) -> Self {
-        Self {
-            timeout: opts.timeout,
-            os_port_selection: opts.os_port_selection,
-            avoid_local_udp_ports: opts.avoid_local_udp_ports.clone(),
         }
     }
 }

@@ -37,7 +37,7 @@ impl<P: ConnectionProvider> NameServer<P> {
     /// Construct a new Nameserver with the configuration and options. The connection provider will create UDP and TCP sockets
     pub fn new(
         config: NameServerConfig,
-        options: Arc<ResolverOpts>,
+        options: Arc<NameServerOptions>,
         tls: Arc<TlsConfig>,
         connection_provider: P,
     ) -> Self {
@@ -48,7 +48,7 @@ impl<P: ConnectionProvider> NameServer<P> {
     pub fn with_connections(
         connections: impl IntoIterator<Item = (Protocol, P::Conn)>,
         config: NameServerConfig,
-        options: Arc<ResolverOpts>,
+        options: Arc<NameServerOptions>,
         tls: Arc<TlsConfig>,
         connection_provider: P,
     ) -> Self {
@@ -115,7 +115,7 @@ impl<P: ConnectionProvider> Debug for NameServer<P> {
 
 struct NameServerState<P: ConnectionProvider> {
     config: NameServerConfig,
-    options: Arc<ResolverOpts>,
+    options: Arc<NameServerOptions>,
     tls: Arc<TlsConfig>,
     connections: AsyncMutex<Vec<ConnectionState<P>>>,
     server_srtt: DecayingSrtt,
@@ -126,7 +126,7 @@ impl<P: ConnectionProvider> NameServerState<P> {
     fn new(
         connections: impl Iterator<Item = (Protocol, P::Conn)>,
         config: NameServerConfig,
-        options: Arc<ResolverOpts>,
+        options: Arc<NameServerOptions>,
         tls: Arc<TlsConfig>,
         connection_provider: P,
     ) -> Self {
@@ -259,7 +259,7 @@ impl<P: ConnectionProvider> NameServerState<P> {
         let handle = Box::pin(self.connection_provider.new_connection(
             self.config.ip,
             config,
-            &ConnectionOptions::from(&*self.options),
+            &self.options.connection_options,
             &self.tls,
         )?)
         .await?;
@@ -269,6 +269,46 @@ impl<P: ConnectionProvider> NameServerState<P> {
         let meta = state.meta.clone();
         connections.push(state);
         Ok((handle, meta))
+    }
+}
+
+/// Options specific to interacting with name servers.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct NameServerOptions {
+    /// Number of concurrent requests per query
+    ///
+    /// Where more than one nameserver is configured, this configures the resolver to send queries
+    /// to a number of servers in parallel. Defaults to 2; 0 or 1 will execute requests serially.
+    pub num_concurrent_reqs: usize,
+
+    /// The ordering strategy for choosing between name servers.
+    pub server_ordering_strategy: ServerOrderingStrategy,
+
+    /// Options pertaining to connections to the name server.
+    pub connection_options: Arc<ConnectionOptions>,
+}
+
+impl Default for NameServerOptions {
+    fn default() -> Self {
+        Self {
+            num_concurrent_reqs: 2,
+            server_ordering_strategy: ServerOrderingStrategy::default(),
+            connection_options: Arc::new(ConnectionOptions::default()),
+        }
+    }
+}
+
+impl From<&ResolverOpts> for NameServerOptions {
+    fn from(options: &ResolverOpts) -> Self {
+        Self {
+            num_concurrent_reqs: options.num_concurrent_reqs,
+            server_ordering_strategy: options.server_ordering_strategy,
+            connection_options: Arc::new(ConnectionOptions {
+                timeout: options.timeout,
+                os_port_selection: options.os_port_selection,
+                avoid_local_udp_ports: options.avoid_local_udp_ports.clone(),
+            }),
+        }
     }
 }
 
@@ -517,7 +557,7 @@ mod tests {
         let config = NameServerConfig::udp(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)));
         let name_server = NameServer::new(
             config,
-            Arc::new(ResolverOpts::default()),
+            Arc::new(NameServerOptions::default()),
             Arc::new(TlsConfig::new().unwrap()),
             TokioRuntimeProvider::default(),
         );
@@ -540,15 +580,16 @@ mod tests {
     async fn test_failed_name_server() {
         subscribe();
 
-        let options = ResolverOpts {
-            timeout: Duration::from_millis(1), // this is going to fail, make it fail fast...
-            ..ResolverOpts::default()
-        };
-
         let config = NameServerConfig::udp(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 252)));
         let name_server = NameServer::new(
             config,
-            Arc::new(options),
+            Arc::new(NameServerOptions {
+                connection_options: Arc::new(ConnectionOptions {
+                    timeout: Duration::from_millis(1), // this is going to fail, make it fail fast...
+                    ..ConnectionOptions::default()
+                }),
+                ..NameServerOptions::default()
+            }),
             Arc::new(TlsConfig::new().unwrap()),
             TokioRuntimeProvider::default(),
         );
@@ -606,16 +647,11 @@ mod tests {
             }],
         };
 
-        let resolver_opts = ResolverOpts {
-            case_randomization: true,
-            ..Default::default()
-        };
-
         let mut request_options = DnsRequestOptions::default();
         request_options.case_randomization = true;
         let ns = NameServer::new(
             config,
-            Arc::new(resolver_opts),
+            Arc::new(NameServerOptions::default()),
             Arc::new(TlsConfig::new().unwrap()),
             provider,
         );

@@ -11,6 +11,6 @@ mod connection_provider;
 pub use connection_provider::{ConnectionOptions, ConnectionProvider, TlsConfig};
 #[allow(clippy::module_inception)]
 mod name_server;
-pub use name_server::NameServer;
+pub use name_server::{NameServer, NameServerOptions};
 mod name_server_pool;
 pub use name_server_pool::NameServerPool;
