@@ -737,7 +737,11 @@ pub enum OpportunisticEncryption {
     /// Opportunistic encryption will be performed.
     #[cfg(any(feature = "__tls", feature = "__quic"))]
     #[cfg_attr(feature = "serde", serde(rename = "true"))]
-    Enabled,
+    Enabled {
+        /// Configuration parameters for opportunistic encryption.
+        #[cfg_attr(feature = "serde", serde(flatten))]
+        config: OpportunisticEncryptionConfig,
+    },
 }
 
 impl OpportunisticEncryption {
@@ -746,9 +750,32 @@ impl OpportunisticEncryption {
         match self {
             Self::Disabled => false,
             #[cfg(any(feature = "__tls", feature = "__quic"))]
-            Self::Enabled => true,
+            Self::Enabled { .. } => true,
         }
     }
+}
+
+/// Configuration parameters for opportunistic encryption.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(default, deny_unknown_fields))]
+pub struct OpportunisticEncryptionConfig {
+    /// How long the recursive resolver remembers a successful encrypted transport connection.
+    #[cfg_attr(feature = "serde", serde(default = "default_persistence_period"))]
+    pub persistence_period: Duration,
+}
+
+impl Default for OpportunisticEncryptionConfig {
+    fn default() -> Self {
+        Self {
+            persistence_period: default_persistence_period(),
+        }
+    }
+}
+
+/// The RFC 9539 suggested default for the resolver persistence period.
+fn default_persistence_period() -> Duration {
+    Duration::from_secs(60 * 60 * 24 * 3) // 3 days
 }
 
 /// A mapping from nameserver IP address and protocol to encrypted transport state.
@@ -792,6 +819,76 @@ impl NameServerTransportState {
                 _ => TransportState::Failed { completed_at },
             },
         );
+    }
+
+    /// Returns true if any supported encrypted protocol had a recent success for the given IP
+    /// within the damping period.
+    #[cfg(any(feature = "__tls", feature = "__quic"))]
+    pub fn any_recent_success(&self, ip: IpAddr, config: &OpportunisticEncryption) -> bool {
+        #[allow(unused_assignments, unused_mut)]
+        let mut tls_success = false;
+        #[allow(unused_assignments, unused_mut)]
+        let mut quic_success = false;
+
+        #[cfg(feature = "__tls")]
+        {
+            tls_success = self.recent_success(ip, Protocol::Tls, config);
+        }
+
+        #[cfg(feature = "__quic")]
+        {
+            quic_success = self.recent_success(ip, Protocol::Quic, config);
+        }
+
+        tls_success || quic_success
+    }
+
+    /// Returns true if any encrypted protocol had a recent success for the given IP within the damping period.
+    #[cfg(not(any(feature = "__tls", feature = "__quic")))]
+    pub fn any_recent_success(&self, _ip: IpAddr, _config: &OpportunisticEncryption) -> bool {
+        false
+    }
+
+    /// Returns true if there has been a successful response within the persistence period for the
+    /// IP/protocol.
+    ///
+    /// Returns false if opportunistic encryption is disabled, or if there has not been a successful
+    /// response read.
+    #[cfg(any(feature = "__tls", feature = "__quic"))]
+    pub fn recent_success(
+        &self,
+        ip: IpAddr,
+        protocol: Protocol,
+        config: &OpportunisticEncryption,
+    ) -> bool {
+        let OpportunisticEncryption::Enabled { config } = config else {
+            return false;
+        };
+
+        let Some(TransportState::Success { last_response, .. }) = self.0.get(&(ip, protocol))
+        else {
+            return false;
+        };
+
+        let Some(last_response) = last_response else {
+            return false;
+        };
+
+        Instant::now().duration_since(*last_response) <= config.persistence_period
+    }
+
+    /// Returns true if there has been a successful response within the persistence period.
+    ///
+    /// Returns false if opportunistic encryption is disabled, or if there has not been a successful
+    /// response read.
+    #[cfg(not(any(feature = "__tls", feature = "__quic")))]
+    pub fn recent_success(
+        &self,
+        _ip: IpAddr,
+        _protocol: Protocol,
+        _config: &OpportunisticEncryption,
+    ) -> bool {
+        false
     }
 }
 

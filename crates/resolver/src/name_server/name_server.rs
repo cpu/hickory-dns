@@ -185,7 +185,12 @@ impl<P: ConnectionProvider> NameServer<P> {
         let mut connections = self.connections.lock().await;
         connections.retain(|conn| matches!(conn.meta.status(), Status::Init | Status::Established));
 
-        if let Some(conn) = preferences.select_connection(&connections) {
+        if let Some(conn) = preferences.select_connection(
+            self.config.ip,
+            &*self.encrypted_transport_state.lock().await,
+            &self.options.opportunistic_encryption,
+            &connections,
+        ) {
             return Ok((conn.handle.clone(), conn.meta.clone(), conn.protocol));
         }
 
@@ -547,7 +552,7 @@ mod tests {
                         Query::query(name.clone(), RecordType::A),
                         DnsRequestOptions::default(),
                     ),
-                    Preferences::default()
+                    Preferences::default(),
                 )
                 .await
                 .is_err()

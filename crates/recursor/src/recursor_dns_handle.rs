@@ -703,7 +703,7 @@ fn name_server_config(
             feature = "quic-aws-lc-rs",
             feature = "quic-ring"
         ))]
-        OpportunisticEncryption::Enabled => NameServerConfig::opportunistic_encryption(ip),
+        OpportunisticEncryption::Enabled { .. } => NameServerConfig::opportunistic_encryption(ip),
         _ => NameServerConfig::udp_and_tcp(ip),
     }
 }
