@@ -9,7 +9,7 @@ use std::{
 };
 
 use async_recursion::async_recursion;
-use futures_util::{StreamExt, stream::FuturesUnordered};
+use futures_util::{StreamExt, lock::Mutex as AsyncMutex, stream::FuturesUnordered};
 use hickory_resolver::name_server::TlsConfig;
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
 use lru_cache::LruCache;
@@ -33,7 +33,9 @@ use crate::{
     recursor_pool::RecursorPool,
     resolver::{
         Name, ResponseCache, TtlConfig,
-        config::{NameServerConfig, OpportunisticEncryption, ResolverOpts},
+        config::{
+            NameServerConfig, NameServerTransportState, OpportunisticEncryption, ResolverOpts,
+        },
         name_server::{ConnectionProvider, NameServerPool},
     },
 };
@@ -55,6 +57,7 @@ pub(crate) struct RecursorDnsHandle<P: ConnectionProvider> {
     avoid_local_udp_ports: Arc<HashSet<u16>>,
     case_randomization: bool,
     opportunistic_encryption: OpportunisticEncryption,
+    encrypted_transport_state: Arc<AsyncMutex<NameServerTransportState>>,
     tls: Arc<TlsConfig>,
     conn_provider: P,
 }
@@ -74,6 +77,7 @@ impl<P: ConnectionProvider> RecursorDnsHandle<P> {
         ttl_config: TtlConfig,
         case_randomization: bool,
         opportunistic_encryption: OpportunisticEncryption,
+        encrypted_transport_state: Arc<AsyncMutex<NameServerTransportState>>,
         tls: Arc<TlsConfig>,
         conn_provider: P,
     ) -> Self {
@@ -97,6 +101,7 @@ impl<P: ConnectionProvider> RecursorDnsHandle<P> {
             servers,
             Arc::new(opts),
             tls.clone(),
+            encrypted_transport_state.clone(),
             conn_provider.clone(),
         );
 
@@ -150,6 +155,7 @@ impl<P: ConnectionProvider> RecursorDnsHandle<P> {
             avoid_local_udp_ports,
             case_randomization,
             opportunistic_encryption,
+            encrypted_transport_state,
             tls,
             conn_provider,
         }
@@ -535,6 +541,7 @@ impl<P: ConnectionProvider> RecursorDnsHandle<P> {
             config_group,
             Arc::new(self.recursor_opts()),
             self.tls.clone(),
+            self.encrypted_transport_state.clone(),
             self.conn_provider.clone(),
         );
         let ns = RecursorPool::from(zone.clone(), ns);
@@ -742,12 +749,17 @@ mod tests {
         sync::Arc,
     };
 
+    use futures_util::lock::Mutex as AsyncMutex;
     use ipnet::IpNet;
 
     use crate::{
         proto::runtime::TokioRuntimeProvider,
         recursor_dns_handle::RecursorDnsHandle,
-        resolver::{TtlConfig, config::OpportunisticEncryption, name_server::TlsConfig},
+        resolver::{
+            TtlConfig,
+            config::{NameServerTransportState, OpportunisticEncryption},
+            name_server::TlsConfig,
+        },
     };
 
     #[test]
@@ -772,6 +784,7 @@ mod tests {
             TtlConfig::default(),
             false,
             OpportunisticEncryption::default(),
+            Arc::new(AsyncMutex::new(NameServerTransportState::default())),
             Arc::new(TlsConfig::new().unwrap()),
             TokioRuntimeProvider::default(),
         );
