@@ -92,6 +92,17 @@ impl Preferences {
             })
     }
 
+    /// Select a connection config that has an allowed protocol that is encrypted.
+    pub(crate) fn select_encrypted_connection_config<'a>(
+        &self,
+        connection_config: &'a [ConnectionConfig],
+    ) -> Option<&'a ConnectionConfig> {
+        connection_config
+            .iter()
+            .filter(|c| self.allows_protocol(c.protocol.to_protocol()))
+            .find(|c| c.protocol.to_protocol().is_encrypted())
+    }
+
     /// Compare two connections according to preferences and performance.
     /// If opportunistic encryption is enabled we make an effort to select an encrypted connection.
     fn compare_connections<P: ConnectionProvider>(

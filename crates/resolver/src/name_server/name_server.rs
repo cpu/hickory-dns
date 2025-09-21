@@ -15,16 +15,19 @@ use futures_util::lock::Mutex as AsyncMutex;
 use parking_lot::Mutex as SyncMutex;
 #[cfg(test)]
 use tokio::time::{Duration, Instant};
-use tracing::debug;
+use tracing::{debug, error, trace, warn};
 
 use crate::config::{
-    NameServerConfig, NameServerTransportState, ResolverOpts, ServerOrderingStrategy,
+    ConnectionConfig, NameServerConfig, NameServerTransportState, ResolverOpts,
+    ServerOrderingStrategy,
 };
 use crate::name_server::connection_provider::{ConnectionProvider, TlsConfig};
 use crate::name_server::preferences::Preferences;
 use crate::proto::{
     DnsError, NoRecords, ProtoError, ProtoErrorKind,
-    op::{DnsRequest, DnsResponse, ResponseCode},
+    op::{DnsRequest, DnsRequestOptions, DnsResponse, Query, ResponseCode},
+    rr::{Name, RecordType},
+    runtime::{RuntimeProvider, Spawn},
     xfer::{DnsHandle, FirstAnswer, Protocol},
 };
 
@@ -210,6 +213,8 @@ impl<P: ConnectionProvider> NameServer<P> {
                 .lock()
                 .await
                 .initiate_connection(self.config.ip, protocol);
+        } else if self.options.opportunistic_encryption.is_enabled() && !protocol.is_encrypted() {
+            self.consider_probe_encrypted_transport(&preferences).await;
         }
 
         let handle = Box::pin(self.connection_provider.new_connection(
@@ -261,6 +266,101 @@ impl<P: ConnectionProvider> NameServer<P> {
 
     pub(super) fn trust_negative_responses(&self) -> bool {
         self.config.trust_negative_responses
+    }
+
+    async fn consider_probe_encrypted_transport(&self, preferences: &Preferences) {
+        let Some(probe_config) =
+            preferences.select_encrypted_connection_config(&self.config.connections)
+        else {
+            warn!("no encrypted connection configs available for probing");
+            return;
+        };
+
+        let probe_protocol = probe_config.protocol.to_protocol();
+        let should_probe = {
+            let state = self.encrypted_transport_state.lock().await;
+            state.should_probe_encrypted(
+                self.config.ip,
+                probe_protocol,
+                &self.options.opportunistic_encryption,
+            )
+        };
+
+        if !should_probe {
+            return;
+        }
+
+        if let Err(err) =
+            self.probe_encrypted_transport(self.encrypted_transport_state.clone(), probe_config)
+        {
+            error!(%err, "opportunistic encrypted probe attempt failed");
+        }
+    }
+
+    fn probe_encrypted_transport(
+        &self,
+        encrypted_transport_state: Arc<AsyncMutex<NameServerTransportState>>,
+        probe_config: &ConnectionConfig,
+    ) -> Result<(), ProtoError> {
+        let mut handle = self.connection_provider.runtime_provider().create_handle();
+        let proto = probe_config.protocol.to_protocol();
+        let ip = self.config.ip;
+        let conn_future =
+            self.connection_provider
+                .new_connection(ip, probe_config, &self.options, &self.tls)?;
+
+        handle.spawn_bg(async move {
+            encrypted_transport_state
+                .lock()
+                .await
+                .initiate_connection(ip, proto);
+
+            let conn = match conn_future.await {
+                Ok(conn) => conn,
+                Err(err) => {
+                    trace!(?proto, "probe connection failed");
+                    encrypted_transport_state
+                        .lock()
+                        .await
+                        .error_received(ip, proto, &err);
+                    return Ok(());
+                }
+            };
+
+            trace!(?proto, "probe connection succeeded");
+            encrypted_transport_state
+                .lock()
+                .await
+                .complete_connection(ip, proto);
+
+            match conn
+                .send(DnsRequest::from_query(
+                    Query::query(Name::root(), RecordType::NS),
+                    DnsRequestOptions::default(),
+                ))
+                .first_answer()
+                .await
+            {
+                Ok(_) => {
+                    trace!(?proto, "probe query succeeded");
+                    encrypted_transport_state
+                        .lock()
+                        .await
+                        .response_received(ip, proto);
+                }
+                Err(err) => {
+                    trace!(?proto, ?err, "probe query failed");
+                    encrypted_transport_state
+                        .lock()
+                        .await
+                        .error_received(ip, proto, &err);
+                }
+            }
+
+            Ok(())
+        });
+
+        Ok(())
     }
 }
 
@@ -497,9 +597,9 @@ mod tests {
 
     use super::*;
     use crate::config::{ConnectionConfig, ProtocolConfig};
-    use crate::proto::op::{DnsRequestOptions, Message, Query, ResponseCode};
+    use crate::proto::op::Message;
     use crate::proto::rr::rdata::NULL;
-    use crate::proto::rr::{Name, RData, Record, RecordType};
+    use crate::proto::rr::{RData, Record};
     use crate::proto::runtime::TokioRuntimeProvider;
 
     #[tokio::test]

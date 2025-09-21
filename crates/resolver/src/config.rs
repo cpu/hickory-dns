@@ -763,12 +763,17 @@ pub struct OpportunisticEncryptionConfig {
     /// How long the recursive resolver remembers a successful encrypted transport connection.
     #[cfg_attr(feature = "serde", serde(default = "default_persistence_period"))]
     pub persistence_period: Duration,
+
+    /// How long the recursive resolver remembers a failed encrypted transport connection.
+    #[cfg_attr(feature = "serde", serde(default = "default_damping_period"))]
+    pub damping_period: Duration,
 }
 
 impl Default for OpportunisticEncryptionConfig {
     fn default() -> Self {
         Self {
             persistence_period: default_persistence_period(),
+            damping_period: default_damping_period(),
         }
     }
 }
@@ -776,6 +781,11 @@ impl Default for OpportunisticEncryptionConfig {
 /// The RFC 9539 suggested default for the resolver persistence period.
 fn default_persistence_period() -> Duration {
     Duration::from_secs(60 * 60 * 24 * 3) // 3 days
+}
+
+/// The RFC 9539 suggested default for the resolver damping period.
+fn default_damping_period() -> Duration {
+    Duration::from_secs(24 * 60 * 60) // 1 day
 }
 
 /// A mapping from nameserver IP address and protocol to encrypted transport state.
@@ -883,6 +893,44 @@ impl NameServerTransportState {
     /// response read.
     #[cfg(not(any(feature = "__tls", feature = "__quic")))]
     pub fn recent_success(
+        &self,
+        _ip: IpAddr,
+        _protocol: Protocol,
+        _config: &OpportunisticEncryption,
+    ) -> bool {
+        false
+    }
+
+    /// Returns true if we should probe encrypted transport based on RFC 9539 damping logic.
+    #[cfg(any(feature = "__tls", feature = "__quic"))]
+    pub fn should_probe_encrypted(
+        &self,
+        ip: IpAddr,
+        protocol: Protocol,
+        config: &OpportunisticEncryption,
+    ) -> bool {
+        debug_assert!(protocol.is_encrypted());
+
+        let OpportunisticEncryption::Enabled { config, .. } = config else {
+            return false;
+        };
+
+        let Some(state) = self.0.get(&(ip, protocol)) else {
+            return true;
+        };
+
+        match state {
+            TransportState::Initiated => false,
+            TransportState::Success { .. } => true,
+            TransportState::Failed { completed_at } | TransportState::TimedOut { completed_at } => {
+                completed_at.elapsed() > config.damping_period
+            }
+        }
+    }
+
+    /// Returns true if we should probe encrypted transport based on RFC 9539 damping logic.
+    #[cfg(not(any(feature = "__tls", feature = "__quic")))]
+    pub fn should_probe_encrypted(
         &self,
         _ip: IpAddr,
         _protocol: Protocol,
