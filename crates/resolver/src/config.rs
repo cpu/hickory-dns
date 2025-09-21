@@ -257,6 +257,31 @@ impl NameServerConfig {
         }
     }
 
+    /// Constructs a nameserver configuration for opportunistic encryption.
+    ///
+    /// This will include configurations for plaintext UDP/TCP as well as DNS-over-TLS and/or
+    /// DNS-over-QUIC depending on feature flag support.
+    ///
+    /// Notably, the TLS and QUIC configurations will **not** verify peer certificates, in
+    /// keeping with RFC 9539's requirement. See [RFC 9539 §4.6.3.4] for more information.
+    ///
+    /// [RFC 9539 §4.6.3.4]: https://www.rfc-editor.org/rfc/rfc9539.html#section-4.6.3.4
+    #[cfg(any(feature = "__tls", feature = "__quic"))]
+    pub fn opportunistic_encryption(ip: IpAddr) -> Self {
+        Self {
+            ip,
+            trust_negative_responses: true,
+            connections: vec![
+                ConnectionConfig::udp(),
+                ConnectionConfig::tcp(),
+                #[cfg(feature = "__tls")]
+                ConnectionConfig::opportunistic_tls(Arc::from(ip.to_string())),
+                #[cfg(feature = "__quic")]
+                ConnectionConfig::opportunistic_quic(Arc::from(ip.to_string())),
+            ],
+        }
+    }
+
     /// Create a new [`NameServerConfig`] from its constituent parts.
     pub fn new(
         ip: IpAddr,
@@ -309,6 +334,17 @@ impl ConnectionConfig {
         })
     }
 
+    /// Constructs a new ConnectionConfig for opportunistic TLS.
+    ///
+    /// This configuration will **not** verify peer certificates. Prefer `tls()` for most uses.
+    #[cfg(feature = "__tls")]
+    pub fn opportunistic_tls(server_name: Arc<str>) -> Self {
+        Self::new(ProtocolConfig::Tls {
+            server_name,
+            insecure_skip_verify: true,
+        })
+    }
+
     /// Constructs a new ConnectionConfig for HTTPS (HTTP/2)
     #[cfg(feature = "__https")]
     pub fn https(server_name: Arc<str>, path: Option<Arc<str>>) -> Self {
@@ -324,6 +360,17 @@ impl ConnectionConfig {
         Self::new(ProtocolConfig::Quic {
             server_name,
             insecure_skip_verify: false,
+        })
+    }
+
+    /// Constructs a new ConnectionConfig for opportunistic QUIC.
+    ///
+    /// This configuration will **not** verify peer certificates. Prefer `quic()` for most uses.
+    #[cfg(feature = "__quic")]
+    pub fn opportunistic_quic(server_name: Arc<str>) -> Self {
+        Self::new(ProtocolConfig::Quic {
+            server_name,
+            insecure_skip_verify: true,
         })
     }
 
@@ -555,6 +602,9 @@ pub struct ResolverOpts {
     ///
     /// If this is provided, `validate` will automatically be set to `true`, enabling DNSSEC validation.
     pub trust_anchor: Option<PathBuf>,
+
+    /// Configure RFC 9539 opportunistic encryption.
+    pub opportunistic_encryption: OpportunisticEncryption,
 }
 
 impl Default for ResolverOpts {
@@ -588,6 +638,7 @@ impl Default for ResolverOpts {
             os_port_selection: false,
             case_randomization: false,
             trust_anchor: None,
+            opportunistic_encryption: OpportunisticEncryption::default(),
         }
     }
 }
@@ -667,6 +718,36 @@ pub enum ResolveHosts {
     /// a DNS forwarder. This is the default.
     #[default]
     Auto,
+}
+
+/// Configuration for enabling RFC 9539 opportunistic encryption.
+///
+/// Controls how a recursive resolver probes name servers to discover if they support
+/// encrypted transports.
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(tag = "enabled"))]
+#[non_exhaustive]
+pub enum OpportunisticEncryption {
+    /// Opportunistic encryption will not be performed.
+    #[default]
+    #[cfg_attr(feature = "serde", serde(rename = "false"))]
+    Disabled,
+    /// Opportunistic encryption will be performed.
+    #[cfg(any(feature = "__tls", feature = "__quic"))]
+    #[cfg_attr(feature = "serde", serde(rename = "true"))]
+    Enabled,
+}
+
+impl OpportunisticEncryption {
+    /// Returns true if opportunistic encryption is enabled.
+    pub fn is_enabled(&self) -> bool {
+        match self {
+            Self::Disabled => false,
+            #[cfg(any(feature = "__tls", feature = "__quic"))]
+            Self::Enabled => true,
+        }
+    }
 }
 
 /// Google Public DNS configuration.

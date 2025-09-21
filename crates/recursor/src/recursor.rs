@@ -25,6 +25,7 @@ use crate::{
     recursor_dns_handle::RecursorDnsHandle,
     resolver::{
         TtlConfig,
+        config::OpportunisticEncryption,
         name_server::{ConnectionProvider, TlsConfig},
     },
 };
@@ -58,6 +59,7 @@ pub struct RecursorBuilder<P: ConnectionProvider> {
     avoid_local_udp_ports: HashSet<u16>,
     ttl_config: TtlConfig,
     case_randomization: bool,
+    opportunistic_encryption: OpportunisticEncryption,
     conn_provider: P,
 }
 
@@ -130,6 +132,12 @@ impl<P: ConnectionProvider> RecursorBuilder<P> {
         self
     }
 
+    /// Configure RFC9539 opportunistic encryption.
+    pub fn opportunistic_encryption(mut self, config: OpportunisticEncryption) -> Self {
+        self.opportunistic_encryption = config;
+        self
+    }
+
     /// Construct a new recursor using the list of root zone name server addresses
     ///
     /// # Panics
@@ -171,6 +179,7 @@ impl<P: ConnectionProvider> Recursor<P> {
             avoid_local_udp_ports: HashSet::new(),
             ttl_config: TtlConfig::default(),
             case_randomization: false,
+            opportunistic_encryption: OpportunisticEncryption::default(),
             conn_provider,
         }
     }
@@ -193,6 +202,7 @@ impl<P: ConnectionProvider> Recursor<P> {
             avoid_local_udp_ports,
             ttl_config,
             case_randomization,
+            opportunistic_encryption,
             conn_provider,
         } = builder;
 
@@ -208,6 +218,7 @@ impl<P: ConnectionProvider> Recursor<P> {
             Arc::new(avoid_local_udp_ports),
             ttl_config.clone(),
             case_randomization,
+            opportunistic_encryption,
             Arc::new(TlsConfig::new()?),
             conn_provider,
         );
