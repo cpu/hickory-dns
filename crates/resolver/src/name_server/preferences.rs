@@ -9,6 +9,7 @@ use std::cmp::Ordering;
 
 use hickory_proto::xfer::Protocol;
 
+use crate::config::ConnectionConfig;
 use crate::name_server::connection_provider::ConnectionProvider;
 use crate::name_server::name_server::{ConnectionState, NameServer};
 
@@ -23,11 +24,6 @@ pub(crate) struct Preferences {
 }
 
 impl Preferences {
-    /// Checks if the given protocol is allowed by current preferences.
-    pub(crate) fn allows_protocol(&self, protocol: Protocol) -> bool {
-        !(self.exclude_udp && protocol == Protocol::Udp)
-    }
-
     /// Checks if the given server has any protocols compatible with current preferences.
     pub(crate) fn allows_server<P: ConnectionProvider>(&self, server: &NameServer<P>) -> bool {
         server.protocols().any(|p| self.allows_protocol(p))
@@ -54,6 +50,15 @@ impl Preferences {
             .min_by(|a, b| self.compare_connections(a, b))
     }
 
+    pub(crate) fn select_connection_config<'a>(
+        &self,
+        connection_configs: &'a [ConnectionConfig],
+    ) -> Option<&'a ConnectionConfig> {
+        connection_configs
+            .iter()
+            .find(|c| self.allows_protocol(c.protocol.to_protocol()))
+    }
+
     /// Compare two connections according to preferences and performance.
     fn compare_connections<P: ConnectionProvider>(
         &self,
@@ -66,5 +71,10 @@ impl Preferences {
             (_, Protocol::Udp) => Ordering::Greater,
             _ => a.meta.srtt.current().total_cmp(&b.meta.srtt.current()),
         }
+    }
+
+    /// Checks if the given protocol is allowed by current preferences.
+    fn allows_protocol(&self, protocol: Protocol) -> bool {
+        !(self.exclude_udp && protocol == Protocol::Udp)
     }
 }
