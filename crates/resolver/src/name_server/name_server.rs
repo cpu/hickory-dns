@@ -18,8 +18,9 @@ use parking_lot::Mutex as SyncMutex;
 use tokio::time::{Duration, Instant};
 use tracing::debug;
 
-use crate::config::{NameServerConfig, ProtocolConfig, ResolverOpts, ServerOrderingStrategy};
+use crate::config::{NameServerConfig, ResolverOpts, ServerOrderingStrategy};
 use crate::name_server::connection_provider::{ConnectionProvider, TlsConfig};
+use crate::name_server::preferences::Preferences;
 use crate::proto::{
     DnsError, NoRecords, ProtoError, ProtoErrorKind,
     op::{DnsRequest, DnsResponse, ResponseCode},
@@ -75,9 +76,9 @@ impl<P: ConnectionProvider> NameServer<P> {
     pub(super) async fn send(
         self: Arc<Self>,
         request: DnsRequest,
-        skip_udp: bool,
+        preferences: Preferences,
     ) -> Result<DnsResponse, ProtoError> {
-        let (handle, meta) = self.connected_mut_client(skip_udp).await?;
+        let (handle, meta) = self.connected_mut_client(preferences).await?;
         let now = Instant::now();
         let response = handle.send(request).first_answer().await;
         let rtt = now.elapsed();
@@ -151,7 +152,7 @@ impl<P: ConnectionProvider> NameServer<P> {
     /// If the connection is in a failed state, then this will establish a new connection
     async fn connected_mut_client(
         &self,
-        skip_udp: bool,
+        preferences: Preferences,
     ) -> Result<(P::Conn, Arc<ConnectionMeta>), ProtoError> {
         let mut connections = self.connections.lock().await;
         connections.retain(|conn| matches!(conn.meta.status(), Status::Init | Status::Established));
@@ -164,7 +165,7 @@ impl<P: ConnectionProvider> NameServer<P> {
             });
 
             let conn = connections.first().unwrap(); // safe to unwrap because we only get here if `connections` is not empty
-            if !(skip_udp && conn.protocol == Protocol::Udp) {
+            if preferences.allows_protocol(conn.protocol) {
                 return Ok((conn.handle.clone(), conn.meta.clone()));
             }
         }
@@ -174,7 +175,7 @@ impl<P: ConnectionProvider> NameServer<P> {
             .config
             .connections
             .iter()
-            .find(|conn| !(matches!(conn.protocol, ProtocolConfig::Udp) && skip_udp))
+            .find(|conn| preferences.allows_protocol(conn.protocol.to_protocol()))
             .ok_or_else(|| ProtoError::from(ProtoErrorKind::NoConnections))?;
 
         let handle = Box::pin(self.connection_provider.new_connection(
@@ -480,7 +481,7 @@ mod tests {
                     Query::query(name.clone(), RecordType::A),
                     DnsRequestOptions::default(),
                 ),
-                false,
+                Preferences::default(),
             )
             .await
             .expect("query failed");
@@ -513,7 +514,7 @@ mod tests {
                         Query::query(name.clone(), RecordType::A),
                         DnsRequestOptions::default(),
                     ),
-                    false
+                    Preferences::default()
                 )
                 .await
                 .is_err()
@@ -579,7 +580,7 @@ mod tests {
                     Query::query(name.clone(), RecordType::NULL),
                     request_options,
                 ),
-                false,
+                Preferences::default(),
             )
             .await
             .unwrap();
