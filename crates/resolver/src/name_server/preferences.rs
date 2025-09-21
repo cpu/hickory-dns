@@ -73,11 +73,23 @@ impl Preferences {
 
     pub(crate) fn select_connection_config<'a>(
         &self,
+        ip: IpAddr,
+        encrypted_transport_state: &NameServerTransportState,
+        opportunistic_encryption: &OpportunisticEncryption,
         connection_configs: &'a [ConnectionConfig],
     ) -> Option<&'a ConnectionConfig> {
         connection_configs
             .iter()
-            .find(|c| self.allows_protocol(c.protocol.to_protocol()))
+            .filter(|c| self.allows_protocol(c.protocol.to_protocol()))
+            .min_by(|a, b| {
+                self.compare_connection_configs(
+                    ip,
+                    encrypted_transport_state,
+                    opportunistic_encryption,
+                    a,
+                    b,
+                )
+            })
     }
 
     /// Compare two connections according to preferences and performance.
@@ -104,6 +116,51 @@ impl Preferences {
             (Protocol::Udp, _) => Ordering::Less,
             (_, Protocol::Udp) => Ordering::Greater,
             _ => a.meta.srtt.current().total_cmp(&b.meta.srtt.current()),
+        }
+    }
+
+    /// Compare two connection configs according to protocol preferences and recent success.
+    fn compare_connection_configs(
+        &self,
+        ip: IpAddr,
+        encrypted_transport_state: &NameServerTransportState,
+        opportunistic_encryption: &OpportunisticEncryption,
+        a: &ConnectionConfig,
+        b: &ConnectionConfig,
+    ) -> Ordering {
+        let a_protocol = a.protocol.to_protocol();
+        let b_protocol = b.protocol.to_protocol();
+
+        // When opportunistic encryption is in-play, prioritize encrypted protocols
+        // that have recent successful connections
+        if opportunistic_encryption.is_enabled() {
+            let a_recent_enc_success = a_protocol.is_encrypted()
+                && encrypted_transport_state.recent_success(
+                    ip,
+                    a_protocol,
+                    opportunistic_encryption,
+                );
+            let b_recent_enc_success = b_protocol.is_encrypted()
+                && encrypted_transport_state.recent_success(
+                    ip,
+                    b_protocol,
+                    opportunistic_encryption,
+                );
+
+            match (a_recent_enc_success, b_recent_enc_success) {
+                (true, false) => return Ordering::Less,
+                (false, true) => return Ordering::Greater,
+                // When both have recent success or neither do, continue with normal ordering
+                _ => {}
+            }
+        }
+
+        // Default protocol ordering: UDP first, then others
+        match (a_protocol, b_protocol) {
+            (ap, bp) if ap == bp => Ordering::Equal,
+            (Protocol::Udp, _) => Ordering::Less,
+            (_, Protocol::Udp) => Ordering::Greater,
+            _ => Ordering::Equal,
         }
     }
 

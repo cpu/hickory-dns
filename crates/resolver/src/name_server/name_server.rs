@@ -196,7 +196,12 @@ impl<P: ConnectionProvider> NameServer<P> {
 
         debug!(config = ?self.config, "connecting");
         let config = preferences
-            .select_connection_config(&self.config.connections)
+            .select_connection_config(
+                self.config.ip,
+                &*self.encrypted_transport_state.lock().await,
+                &self.options.opportunistic_encryption,
+                &self.config.connections,
+            )
             .ok_or_else(|| ProtoError::from(ProtoErrorKind::NoConnections))?;
 
         let protocol = config.protocol.to_protocol();
