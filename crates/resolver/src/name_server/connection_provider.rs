@@ -38,7 +38,7 @@ use crate::proto::{
     xfer::{Connecting, DnsExchange, DnsHandle, DnsMultiplexer},
 };
 #[cfg(feature = "__tls")]
-use hickory_proto::rustls::client_config;
+use hickory_proto::rustls::{NoCertificateVerification, client_config};
 
 /// Create `DnsHandle` with the help of `RuntimeProvider`.
 /// This trait is designed for customization.
@@ -150,7 +150,13 @@ impl<P: RuntimeProvider> ConnectionProvider for P {
                 Connecting::Tcp(exchange)
             }
             #[cfg(feature = "__tls")]
-            (ProtocolConfig::Tls { server_name }, _) => {
+            (
+                ProtocolConfig::Tls {
+                    server_name,
+                    insecure_skip_verify,
+                },
+                _,
+            ) => {
                 let timeout = options.timeout;
                 let tcp_future = self.connect_tcp(remote_addr, None, None);
 
@@ -164,6 +170,12 @@ impl<P: RuntimeProvider> ConnectionProvider for P {
                 let mut tls_config = tls.config.clone();
                 // The port (853) of DOT is for dns dedicated, SNI is unnecessary. (ISP block by the SNI name)
                 tls_config.enable_sni = false;
+
+                if *insecure_skip_verify {
+                    tls_config
+                        .dangerous()
+                        .set_certificate_verifier(Arc::new(NoCertificateVerification::new()))
+                }
 
                 let (stream, handle) = tls_client_connect_with_future(
                     tcp_future,
@@ -187,15 +199,28 @@ impl<P: RuntimeProvider> ConnectionProvider for P {
                 )))
             }
             #[cfg(feature = "__quic")]
-            (ProtocolConfig::Quic { server_name }, Some(binder)) => {
+            (
+                ProtocolConfig::Quic {
+                    server_name,
+                    insecure_skip_verify,
+                },
+                Some(binder),
+            ) => {
                 let bind_addr = config.bind_addr.unwrap_or(match remote_addr {
                     SocketAddr::V4(_) => SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),
                     SocketAddr::V6(_) => SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0),
                 });
 
+                let mut tls_config = tls.config.clone();
+                if *insecure_skip_verify {
+                    tls_config
+                        .dangerous()
+                        .set_certificate_verifier(Arc::new(NoCertificateVerification::new()))
+                }
+
                 Connecting::Quic(DnsExchange::connect(
                     QuicClientStream::builder()
-                        .crypto_config(tls.config.clone())
+                        .crypto_config(tls_config)
                         .build_with_future(
                             binder.bind_quic(bind_addr, remote_addr)?,
                             remote_addr,
