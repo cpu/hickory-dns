@@ -753,6 +753,15 @@ impl OpportunisticEncryption {
             Self::Enabled { .. } => true,
         }
     }
+
+    /// Returns the maximum number of concurrent probes if opportunistic encrypt is enabled.
+    pub fn max_concurrent_probes(&self) -> Option<u8> {
+        match self {
+            Self::Disabled => None,
+            #[cfg(any(feature = "__tls", feature = "__quic"))]
+            Self::Enabled { config, .. } => Some(config.max_concurrent_probes),
+        }
+    }
 }
 
 /// Configuration parameters for opportunistic encryption.
@@ -767,6 +776,10 @@ pub struct OpportunisticEncryptionConfig {
     /// How long the recursive resolver remembers a failed encrypted transport connection.
     #[cfg_attr(feature = "serde", serde(default = "default_damping_period"))]
     pub damping_period: Duration,
+
+    /// Maximum number of concurrent opportunistic encryption probes.
+    #[cfg_attr(feature = "serde", serde(default = "default_max_concurrent_probes"))]
+    pub max_concurrent_probes: u8,
 }
 
 impl Default for OpportunisticEncryptionConfig {
@@ -774,6 +787,7 @@ impl Default for OpportunisticEncryptionConfig {
         Self {
             persistence_period: default_persistence_period(),
             damping_period: default_damping_period(),
+            max_concurrent_probes: default_max_concurrent_probes(),
         }
     }
 }
@@ -786,6 +800,11 @@ fn default_persistence_period() -> Duration {
 /// The RFC 9539 suggested default for the resolver damping period.
 fn default_damping_period() -> Duration {
     Duration::from_secs(24 * 60 * 60) // 1 day
+}
+
+/// A conservative default for the maximum number of in-flight opportunistic probe requests.
+fn default_max_concurrent_probes() -> u8 {
+    10
 }
 
 /// A mapping from nameserver IP address and protocol to encrypted transport state.

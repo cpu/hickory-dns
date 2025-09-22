@@ -3,6 +3,7 @@ use std::io;
 use std::net::{IpAddr, Ipv4Addr};
 use std::slice;
 use std::str::FromStr;
+use std::sync::atomic::AtomicU8;
 use std::sync::{
     Arc,
     atomic::{AtomicIsize, Ordering},
@@ -118,6 +119,7 @@ fn mock_nameserver_on_send_nx<O: OnSend + Unpin>(
         Arc::new(options),
         Arc::new(TlsConfig::new().unwrap()),
         Arc::new(AsyncMutex::new(NameServerTransportState::default())),
+        Arc::new(AtomicU8::default()),
         conn_provider,
     ))
 }

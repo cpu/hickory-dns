@@ -58,6 +58,7 @@ pub(crate) struct RecursorDnsHandle<P: ConnectionProvider> {
     case_randomization: bool,
     opportunistic_encryption: OpportunisticEncryption,
     encrypted_transport_state: Arc<AsyncMutex<NameServerTransportState>>,
+    opportunistic_probe_budget: Arc<AtomicU8>,
     tls: Arc<TlsConfig>,
     conn_provider: P,
 }
@@ -97,11 +98,19 @@ impl<P: ConnectionProvider> RecursorDnsHandle<P> {
             case_randomization,
             opportunistic_encryption.clone(),
         );
+
+        let opportunistic_probe_budget = Arc::new(AtomicU8::new(
+            opportunistic_encryption
+                .max_concurrent_probes()
+                .unwrap_or_default(),
+        ));
+
         let roots = NameServerPool::from_config(
             servers,
             Arc::new(opts),
             tls.clone(),
             encrypted_transport_state.clone(),
+            opportunistic_probe_budget.clone(),
             conn_provider.clone(),
         );
 
@@ -156,6 +165,7 @@ impl<P: ConnectionProvider> RecursorDnsHandle<P> {
             case_randomization,
             opportunistic_encryption,
             encrypted_transport_state,
+            opportunistic_probe_budget,
             tls,
             conn_provider,
         }
@@ -542,6 +552,7 @@ impl<P: ConnectionProvider> RecursorDnsHandle<P> {
             Arc::new(self.recursor_opts()),
             self.tls.clone(),
             self.encrypted_transport_state.clone(),
+            self.opportunistic_probe_budget.clone(),
             self.conn_provider.clone(),
         );
         let ns = RecursorPool::from(zone.clone(), ns);

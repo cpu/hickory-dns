@@ -42,6 +42,7 @@ pub struct NameServer<P: ConnectionProvider> {
     connections: AsyncMutex<Vec<ConnectionState<P>>>,
     server_srtt: DecayingSrtt,
     encrypted_transport_state: Arc<AsyncMutex<NameServerTransportState>>,
+    opportunistic_probe_budget: Arc<AtomicU8>,
     connection_provider: P,
 }
 
@@ -55,6 +56,7 @@ impl<P: ConnectionProvider> NameServer<P> {
         options: Arc<ResolverOpts>,
         tls: Arc<TlsConfig>,
         encrypted_transport_state: Arc<AsyncMutex<NameServerTransportState>>,
+        opportunistic_probe_budget: Arc<AtomicU8>,
         connection_provider: P,
     ) -> Self {
         let mut connections = connections
@@ -75,6 +77,7 @@ impl<P: ConnectionProvider> NameServer<P> {
             connections: AsyncMutex::new(connections),
             server_srtt: DecayingSrtt::new(Duration::from_micros(rand::random_range(1..32))),
             encrypted_transport_state,
+            opportunistic_probe_budget,
             connection_provider,
         }
     }
@@ -302,12 +305,23 @@ impl<P: ConnectionProvider> NameServer<P> {
         encrypted_transport_state: Arc<AsyncMutex<NameServerTransportState>>,
         probe_config: &ConnectionConfig,
     ) -> Result<(), ProtoError> {
+        let budget = self.opportunistic_probe_budget.load(Ordering::Relaxed);
+        if budget == 0
+            || self
+                .opportunistic_probe_budget
+                .compare_exchange_weak(budget, budget - 1, Ordering::AcqRel, Ordering::Relaxed)
+                .is_err()
+        {
+            trace!("no remaining budget for opportunistic probing");
+        }
+
         let mut handle = self.connection_provider.runtime_provider().create_handle();
         let proto = probe_config.protocol.to_protocol();
         let ip = self.config.ip;
         let conn_future =
             self.connection_provider
                 .new_connection(ip, probe_config, &self.options, &self.tls)?;
+        let budget = self.opportunistic_probe_budget.clone();
 
         handle.spawn_bg(async move {
             encrypted_transport_state
@@ -357,6 +371,7 @@ impl<P: ConnectionProvider> NameServer<P> {
                 }
             }
 
+            budget.fetch_add(1, Ordering::Relaxed);
             Ok(())
         });
 
@@ -613,6 +628,7 @@ mod tests {
             Arc::new(ResolverOpts::default()),
             Arc::new(TlsConfig::new().unwrap()),
             Arc::new(AsyncMutex::new(NameServerTransportState::default())),
+            Arc::new(AtomicU8::default()),
             TokioRuntimeProvider::default(),
         ));
 
@@ -646,6 +662,7 @@ mod tests {
             Arc::new(options),
             Arc::new(TlsConfig::new().unwrap()),
             Arc::new(AsyncMutex::new(NameServerTransportState::default())),
+            Arc::new(AtomicU8::default()),
             TokioRuntimeProvider::default(),
         ));
 
@@ -715,6 +732,7 @@ mod tests {
             Arc::new(resolver_opts),
             Arc::new(TlsConfig::new().unwrap()),
             Arc::new(AsyncMutex::new(NameServerTransportState::default())),
+            Arc::new(AtomicU8::default()),
             provider,
         ));
 
