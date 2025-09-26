@@ -283,7 +283,7 @@ impl TlsConfig {
     pub fn insecure_skip_verify(&mut self) {
         self.config
             .dangerous()
-            .set_certificate_verifier(Arc::new(NoCertificateVerification::new()));
+            .set_certificate_verifier(Arc::new(NoCertificateVerification::default()));
     }
 }
 

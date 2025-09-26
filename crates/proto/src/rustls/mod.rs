@@ -68,16 +68,9 @@ pub fn default_provider() -> CryptoProvider {
 #[derive(Debug)]
 pub struct NoCertificateVerification(CryptoProvider);
 
-impl NoCertificateVerification {
-    /// Construct a new `NoCertificateVerification` verifier with the default crypto provider.
-    pub fn new() -> Self {
-        Self(default_provider())
-    }
-}
-
 impl Default for NoCertificateVerification {
     fn default() -> Self {
-        Self::new()
+        Self(default_provider())
     }
 }
 
