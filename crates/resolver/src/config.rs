@@ -276,9 +276,9 @@ impl NameServerConfig {
                 ConnectionConfig::udp(),
                 ConnectionConfig::tcp(),
                 #[cfg(feature = "__tls")]
-                ConnectionConfig::opportunistic_tls(Arc::from(ip.to_string())),
+                ConnectionConfig::tls(Arc::from(ip.to_string())),
                 #[cfg(feature = "__quic")]
-                ConnectionConfig::opportunistic_quic(Arc::from(ip.to_string())),
+                ConnectionConfig::quic(Arc::from(ip.to_string())),
             ],
         }
     }
@@ -329,21 +329,7 @@ impl ConnectionConfig {
     /// Constructs a new ConnectionConfig for TLS
     #[cfg(feature = "__tls")]
     pub fn tls(server_name: Arc<str>) -> Self {
-        Self::new(ProtocolConfig::Tls {
-            server_name,
-            insecure_skip_verify: false,
-        })
-    }
-
-    /// Constructs a new ConnectionConfig for opportunistic TLS.
-    ///
-    /// This configuration will **not** verify peer certificates. Prefer `tls()` for most uses.
-    #[cfg(feature = "__tls")]
-    pub fn opportunistic_tls(server_name: Arc<str>) -> Self {
-        Self::new(ProtocolConfig::Tls {
-            server_name,
-            insecure_skip_verify: true,
-        })
+        Self::new(ProtocolConfig::Tls { server_name })
     }
 
     /// Constructs a new ConnectionConfig for HTTPS (HTTP/2)
@@ -358,21 +344,7 @@ impl ConnectionConfig {
     /// Constructs a new ConnectionConfig for QUIC
     #[cfg(feature = "__quic")]
     pub fn quic(server_name: Arc<str>) -> Self {
-        Self::new(ProtocolConfig::Quic {
-            server_name,
-            insecure_skip_verify: false,
-        })
-    }
-
-    /// Constructs a new ConnectionConfig for opportunistic QUIC.
-    ///
-    /// This configuration will **not** verify peer certificates. Prefer `quic()` for most uses.
-    #[cfg(feature = "__quic")]
-    pub fn opportunistic_quic(server_name: Arc<str>) -> Self {
-        Self::new(ProtocolConfig::Quic {
-            server_name,
-            insecure_skip_verify: true,
-        })
+        Self::new(ProtocolConfig::Quic { server_name })
     }
 
     /// Constructs a new ConnectionConfig for HTTP/3
@@ -433,10 +405,6 @@ pub enum ProtocolConfig {
     Tls {
         /// The server name to use in the TLS handshake.
         server_name: Arc<str>,
-        /// Skip verification of the peer certificate.
-        ///
-        /// Except in specific contexts (e.g. opportunistic encryption) this is **insecure**.
-        insecure_skip_verify: bool,
     },
     #[cfg(feature = "__https")]
     Https {
@@ -449,10 +417,6 @@ pub enum ProtocolConfig {
     Quic {
         /// The server name to use in the TLS handshake.
         server_name: Arc<str>,
-        /// Skip verification of the peer certificate.
-        ///
-        /// Except in specific contexts (e.g. opportunistic encryption) this is **insecure**.
-        insecure_skip_verify: bool,
     },
     #[cfg(feature = "__h3")]
     H3 {

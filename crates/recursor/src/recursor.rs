@@ -221,6 +221,11 @@ impl<P: ConnectionProvider> Recursor<P> {
             conn_provider,
         } = builder;
 
+        let mut tls_config = TlsConfig::new()?;
+        if opportunistic_encryption.is_enabled() {
+            tls_config.insecure_skip_verify();
+        }
+
         let handle = RecursorDnsHandle::new(
             roots,
             ns_cache_size,
@@ -235,7 +240,7 @@ impl<P: ConnectionProvider> Recursor<P> {
             case_randomization,
             opportunistic_encryption,
             encrypted_transport_state,
-            Arc::new(TlsConfig::new()?),
+            Arc::new(tls_config),
             conn_provider,
         );
 
