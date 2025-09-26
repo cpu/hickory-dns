@@ -691,16 +691,13 @@ pub enum ResolveHosts {
 /// encrypted transports.
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "serde", serde(tag = "enabled"))]
 #[non_exhaustive]
 pub enum OpportunisticEncryption {
     /// Opportunistic encryption will not be performed.
     #[default]
-    #[cfg_attr(feature = "serde", serde(rename = "false"))]
     Disabled,
     /// Opportunistic encryption will be performed.
     #[cfg(any(feature = "__tls", feature = "__quic"))]
-    #[cfg_attr(feature = "serde", serde(rename = "true"))]
     Enabled {
         /// Configuration parameters for opportunistic encryption.
         #[cfg_attr(feature = "serde", serde(flatten))]
