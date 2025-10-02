@@ -1226,7 +1226,10 @@ mod tests {
 
         let ns_ip = IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1));
         let mut state = NameServerTransportState::default();
-        let opp_enc_config = OpportunisticEncryptionConfig::default();
+        let opp_enc_config = OpportunisticEncryptionConfig {
+            persistence_period: Duration::from_secs(10),
+            ..OpportunisticEncryptionConfig::default()
+        };
         let opp_enc = &OpportunisticEncryption::Enabled {
             config: opp_enc_config,
         };
@@ -1235,14 +1238,8 @@ mod tests {
         state.complete_connection(ns_ip, Protocol::Tls);
         state.response_received(ns_ip, Protocol::Tls);
         // And then update the last response time to be too stale for consideration.
-        let stale_time = std::time::Instant::now()
-            .checked_sub(
-                opp_enc_config
-                    .persistence_period
-                    .checked_add(Duration::from_secs(1))
-                    .unwrap(),
-            )
-            .unwrap();
+        let stale_time =
+            std::time::Instant::now() - opp_enc_config.persistence_period - Duration::from_secs(1);
         state.set_last_response(ns_ip, Protocol::Tls, stale_time);
 
         // When opportunistic encryption is enabled, but there are no encrypted connections available,
@@ -1369,7 +1366,10 @@ mod tests {
         let configs = NameServerConfig::opportunistic_encryption(ns_ip).connections;
 
         let mut state = NameServerTransportState::default();
-        let opp_enc_config = OpportunisticEncryptionConfig::default();
+        let opp_enc_config = OpportunisticEncryptionConfig {
+            persistence_period: Duration::from_secs(10),
+            ..OpportunisticEncryptionConfig::default()
+        };
         let opp_enc = &OpportunisticEncryption::Enabled {
             config: opp_enc_config,
         };
@@ -1378,14 +1378,8 @@ mod tests {
         state.complete_connection(ns_ip, Protocol::Tls);
         state.response_received(ns_ip, Protocol::Tls);
         // And then update the last response time to be too stale for consideration.
-        let stale_time = std::time::Instant::now()
-            .checked_sub(
-                opp_enc_config
-                    .persistence_period
-                    .checked_add(Duration::from_secs(1))
-                    .unwrap(),
-            )
-            .unwrap();
+        let stale_time =
+            std::time::Instant::now() - opp_enc_config.persistence_period - Duration::from_secs(1);
         state.set_last_response(ns_ip, Protocol::Tls, stale_time);
 
         // When opportunistic encryption is enabled, but our probe state indicates success that is too stale,
@@ -1590,7 +1584,10 @@ mod tests {
         let mock_provider = MockProvider::default();
         let config = NameServerConfig::opportunistic_encryption(ns_ip);
 
-        let opp_enc_config = OpportunisticEncryptionConfig::default();
+        let opp_enc_config = OpportunisticEncryptionConfig {
+            damping_period: Duration::from_secs(5),
+            ..OpportunisticEncryptionConfig::default()
+        };
         let options = Arc::new(ResolverOpts {
             opportunistic_encryption: OpportunisticEncryption::Enabled {
                 config: opp_enc_config,
@@ -1605,14 +1602,8 @@ mod tests {
         // Set up state to show an old failure outside the damping period.
         {
             let mut state = encrypted_transport_state.lock().await;
-            let old_failure_time = std::time::Instant::now()
-                .checked_sub(
-                    opp_enc_config
-                        .damping_period
-                        .checked_add(Duration::from_secs(1))
-                        .unwrap(),
-                )
-                .unwrap();
+            let old_failure_time =
+                std::time::Instant::now() - opp_enc_config.damping_period - Duration::from_secs(1);
             state.set_failure_time(ns_ip, Protocol::Tls, old_failure_time);
         }
 
