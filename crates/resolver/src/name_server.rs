@@ -334,7 +334,8 @@ impl<P: ConnectionProvider> NameServer<P> {
             #[cfg(feature = "metrics")]
             self.opportunistic_probe_metrics.clone(),
         )?;
-        self.connection_provider
+        let _ = self
+            .connection_provider
             .runtime_provider()
             .create_handle()
             .spawn_bg(connect.run());
@@ -1312,7 +1313,7 @@ mod opportunistic_enc_tests {
     use crate::proto::NetErrorKind;
     use crate::proto::op::{DnsRequest, DnsResponse, Message, ResponseCode};
     use crate::proto::runtime::iocompat::AsyncIoTokioAsStd;
-    use crate::proto::runtime::{RuntimeProvider, Spawn, TokioTime};
+    use crate::proto::runtime::{RuntimeProvider, Spawn, TaskHandle, TokioTime};
     use crate::proto::xfer::Protocol;
     use crate::proto::{DnsHandle, NetError};
 
@@ -2192,11 +2193,21 @@ mod opportunistic_enc_tests {
     #[derive(Clone)]
     struct MockSyncHandle;
 
+    struct MockTaskHandle;
+
+    impl TaskHandle for MockTaskHandle {
+        fn cancel(self) {
+            // Nothing to cancel in mock
+        }
+    }
+
     impl Spawn for MockSyncHandle {
+        type TaskHandle = MockTaskHandle;
+
         fn spawn_bg(
             &mut self,
             future: impl Future<Output = Result<(), NetError>> + Send + 'static,
-        ) {
+        ) -> Self::TaskHandle {
             // Instead of spawning the future as a background task, poll it synchronously
             // until completion.
             let waker = futures_util::task::noop_waker();
@@ -2209,6 +2220,8 @@ mod opportunistic_enc_tests {
                     Poll::Pending => continue,
                 }
             }
+
+            MockTaskHandle
         }
     }
 }

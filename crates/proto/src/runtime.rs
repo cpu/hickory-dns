@@ -127,7 +127,7 @@ mod tokio_runtime {
     #[cfg(feature = "__quic")]
     use quinn::Runtime;
     use tokio::net::{TcpSocket, TcpStream, UdpSocket as TokioUdpSocket};
-    use tokio::task::JoinSet;
+    use tokio::task::{AbortHandle, JoinSet};
     use tokio::time::timeout;
 
     use super::iocompat::AsyncIoTokioAsStd;
@@ -141,13 +141,27 @@ mod tokio_runtime {
     }
 
     impl Spawn for TokioHandle {
+        type TaskHandle = TokioTaskHandle;
+
         fn spawn_bg(
             &mut self,
             future: impl Future<Output = Result<(), NetError>> + Send + 'static,
-        ) {
+        ) -> Self::TaskHandle {
             let mut join_set = self.join_set.lock().unwrap();
-            join_set.spawn(future);
+            let abort_handle = join_set.spawn(future);
             reap_tasks(&mut join_set);
+            TokioTaskHandle { abort_handle }
+        }
+    }
+
+    /// A handle to a spawned Tokio task.
+    pub struct TokioTaskHandle {
+        abort_handle: AbortHandle,
+    }
+
+    impl TaskHandle for TokioTaskHandle {
+        fn cancel(self) {
+            self.abort_handle.abort();
         }
     }
 
@@ -300,8 +314,20 @@ pub trait QuicSocketBinder {
 
 /// A type defines the Handle which can spawn future.
 pub trait Spawn {
-    /// Spawn a future in the background
-    fn spawn_bg(&mut self, future: impl Future<Output = Result<(), NetError>> + Send + 'static);
+    /// Handle to a spawned background task
+    type TaskHandle: TaskHandle;
+
+    /// Spawn a future in the background, returning a handle that can cancel it
+    fn spawn_bg(
+        &mut self,
+        future: impl Future<Output = Result<(), NetError>> + Send + 'static,
+    ) -> Self::TaskHandle;
+}
+
+/// A handle to a spawned background task that can be cancelled.
+pub trait TaskHandle: Send + Sync {
+    /// Cancel/abort the task
+    fn cancel(self);
 }
 
 /// Generic executor.
