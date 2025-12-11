@@ -125,6 +125,7 @@ jobs:
             dnssec-aws-lc-rs,
             dnssec-ring,
             doc,
+            metrics,
           ]
     env:
       RUST_LOG: trace
