@@ -39,7 +39,7 @@ use crate::{
         op::Query,
         op::ResponseSigner,
         rr::{LowerName, Name, RData, Record, RecordSet, RecordType},
-        runtime::RuntimeProvider,
+        runtime::{RuntimeProvider, Spawn, TaskHandle},
         serialize::txt::{ParseError, Parser},
     },
     resolver::{
@@ -61,7 +61,7 @@ pub struct RecursiveZoneHandler<P: RuntimeProvider> {
     origin: LowerName,
     recursor: Recursor<P>,
     #[allow(dead_code)] // Handle is retained to Drop along with RecursiveZoneHandler.
-    opportunistic_encryption_persistence_task: Option<P::Handle>,
+    opportunistic_encryption_persistence_task: Option<<P::Handle as Spawn>::TaskHandle>,
 }
 
 impl<P: RuntimeProvider> RecursiveZoneHandler<P> {
@@ -251,6 +251,14 @@ impl<P: RuntimeProvider> ZoneHandler for RecursiveZoneHandler<P> {
     #[cfg(feature = "metrics")]
     fn metrics_label(&self) -> &'static str {
         "recursive"
+    }
+}
+
+impl<P: RuntimeProvider> Drop for RecursiveZoneHandler<P> {
+    fn drop(&mut self) {
+        if let Some(task) = self.opportunistic_encryption_persistence_task.take() {
+            task.cancel();
+        }
     }
 }
 

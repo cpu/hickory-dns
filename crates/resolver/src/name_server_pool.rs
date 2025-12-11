@@ -799,7 +799,7 @@ mod opportunistic_encryption_persistence {
             config: &OpportunisticEncryptionConfig,
             pool_context: &Arc<PoolContext>,
             conn_provider: P,
-        ) -> Result<Option<P::Handle>, String> {
+        ) -> Result<Option<<P::Handle as Spawn>::TaskHandle>, String> {
             let Some(persistence) = &config.persistence else {
                 return Ok(None);
             };
@@ -824,8 +824,8 @@ mod opportunistic_encryption_persistence {
                 })?;
 
             let mut handle = conn_provider.create_handle();
-            handle.spawn_bg(new.run());
-            Ok(Some(handle))
+            let task_handle = handle.spawn_bg(new.run());
+            Ok(Some(task_handle))
         }
 
         fn new(
