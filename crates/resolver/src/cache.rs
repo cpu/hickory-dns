@@ -99,6 +99,18 @@ impl ResponseCache {
     pub(crate) fn clear_query(&self, query: &Query) {
         self.cache.invalidate(query);
     }
+
+    /// Returns the approximate number of entries in the cache.
+    #[cfg(feature = "metrics")]
+    pub(crate) fn entry_count(&self) -> u64 {
+        // Ensure pending tasks are processed before getting the count.
+        // This allows tests of the respective cache size metrics to be
+        // written without flakyness. In production context, we're happier
+        // to defer background work and to return an approximate count.
+        #[cfg(test)]
+        self.cache.run_pending_tasks();
+        self.cache.entry_count()
+    }
 }
 
 /// An entry in the response cache.

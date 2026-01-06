@@ -94,7 +94,8 @@ pub mod recursor {
     #[cfg(feature = "__dnssec")]
     use hickory_proto::{dnssec::Proof, op::Message};
     use metrics::{
-        Counter, Histogram, Unit, counter, describe_counter, describe_histogram, histogram,
+        Counter, Gauge, Histogram, Unit, counter, describe_counter, describe_gauge,
+        describe_histogram, gauge, histogram,
     };
 
     /// Number of recursive requests answered from the cache.
@@ -111,6 +112,13 @@ pub mod recursor {
 
     /// Duration of recursive resolution for queries that are not answered from cache.
     pub const CACHE_MISS_DURATION: &str = "hickory_recursor_cache_miss_duration_seconds";
+
+    /// Number of entries in the response cache.
+    pub const CACHE_SIZE: &str = "hickory_recursor_cache_size";
+
+    /// Number of entries in the DNSSEC validated response cache.
+    #[cfg(feature = "__dnssec")]
+    pub const VALIDATED_CACHE_SIZE: &str = "hickory_recursor_validated_cache_size";
 
     /// Number of recursive requests with answers that were DNSSEC validated as secure.
     #[cfg(feature = "__dnssec")]
@@ -136,6 +144,9 @@ pub mod recursor {
         pub(crate) outgoing_query_counter: Counter,
         pub(crate) cache_hit_duration: Histogram,
         pub(crate) cache_miss_duration: Histogram,
+        pub(crate) cache_size: Gauge,
+        #[cfg(feature = "__dnssec")]
+        pub(crate) validated_cache_size: Gauge,
         #[cfg(feature = "__dnssec")]
         pub(crate) dnssec_metrics: DnssecRecursorMetrics,
     }
@@ -173,12 +184,31 @@ pub mod recursor {
                 Unit::Seconds,
                 "Duration of recursive resolution for queries that are not answered from cache."
             );
+            let cache_size = gauge!(CACHE_SIZE);
+            describe_gauge!(
+                CACHE_SIZE,
+                Unit::Count,
+                "Number of entries in the response cache."
+            );
+            #[cfg(feature = "__dnssec")]
+            let validated_cache_size = {
+                let gauge = gauge!(VALIDATED_CACHE_SIZE);
+                describe_gauge!(
+                    VALIDATED_CACHE_SIZE,
+                    Unit::Count,
+                    "Number of entries in the DNSSEC validated response cache."
+                );
+                gauge
+            };
             Self {
                 cache_hit_counter,
                 cache_miss_counter,
                 outgoing_query_counter,
                 cache_hit_duration,
                 cache_miss_duration,
+                cache_size,
+                #[cfg(feature = "__dnssec")]
+                validated_cache_size,
                 #[cfg(feature = "__dnssec")]
                 dnssec_metrics: DnssecRecursorMetrics::default(),
             }

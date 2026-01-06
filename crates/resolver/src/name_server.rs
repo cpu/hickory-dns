@@ -2072,7 +2072,7 @@ mod opportunistic_enc_tests {
 }
 
 /// Shared test utilities for mocking connection providers and DNS handles
-#[cfg(test)]
+#[cfg(all(test, any(feature = "__tls", feature = "metrics")))]
 mod test_support {
     use std::future::Future;
     use std::io;
@@ -2109,6 +2109,7 @@ mod test_support {
     }
 
     impl MockProvider {
+        #[cfg(feature = "__tls")]
         pub(super) fn new_connection_calls(&self) -> Vec<(IpAddr, ProtocolConfig)> {
             self.new_connection_calls.lock().clone()
         }
