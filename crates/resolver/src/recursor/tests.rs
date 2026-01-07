@@ -791,7 +791,7 @@ mod metrics {
     };
     use crate::metrics::recursor::{
         CACHE_HIT_DURATION, CACHE_HIT_TOTAL, CACHE_MISS_DURATION, CACHE_MISS_TOTAL, CACHE_SIZE,
-        CONNECTION_CACHE_SIZE, NAME_SERVER_CACHE_SIZE, OUTGOING_QUERIES_TOTAL,
+        CONNECTION_CACHE_SIZE, IN_FLIGHT_QUERIES, NAME_SERVER_CACHE_SIZE, OUTGOING_QUERIES_TOTAL,
     };
     #[cfg(feature = "__dnssec")]
     use crate::recursor::DnssecConfig;
@@ -886,6 +886,7 @@ mod metrics {
             assert_gauge_eq(&map, CACHE_SIZE, vec![], 3);
             assert_gauge_eq(&map, NAME_SERVER_CACHE_SIZE, vec![], 2);
             assert_gauge_eq(&map, CONNECTION_CACHE_SIZE, vec![], 2);
+            assert_gauge_eq(&map, IN_FLIGHT_QUERIES, vec![], 0);
         }
 
         #[cfg(feature = "__dnssec")]
@@ -915,6 +916,7 @@ mod metrics {
             assert_gauge_eq(&map, VALIDATED_CACHE_SIZE, vec![], 1);
             assert_gauge_eq(&map, NAME_SERVER_CACHE_SIZE, vec![], 2);
             assert_gauge_eq(&map, CONNECTION_CACHE_SIZE, vec![], 2);
+            assert_gauge_eq(&map, IN_FLIGHT_QUERIES, vec![], 0);
         }
     }
 

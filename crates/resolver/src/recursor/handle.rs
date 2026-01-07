@@ -16,7 +16,7 @@ use tracing::{debug, error, trace, warn};
 
 use super::{DnssecPolicy, RecursorError, RecursorOptions, error::AuthorityData, is_subzone};
 #[cfg(feature = "metrics")]
-use crate::metrics::recursor::RecursorMetrics;
+use crate::metrics::recursor::{InFlightGuard, RecursorMetrics};
 #[cfg(feature = "__dnssec")]
 use crate::proto::dnssec::rdata::DNSSECRData;
 use crate::{
@@ -157,6 +157,9 @@ impl<P: ConnectionProvider> RecursorDnsHandle<P> {
         depth: u8,
         cname_limit: Arc<AtomicU8>,
     ) -> Result<Message, RecursorError> {
+        #[cfg(feature = "metrics")]
+        let _guard = self.metrics.new_inflight_query();
+
         if let Some(result) = self.response_cache.get(&query, request_time) {
             let response = result?;
             if response.authoritative() {
