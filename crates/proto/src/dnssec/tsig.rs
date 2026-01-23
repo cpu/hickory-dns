@@ -108,7 +108,12 @@ impl ResponseSigner for TSigResponseSigner {
             Some(TsigError::BadSig | TsigError::BadKey)
         ));
 
-        let mut stub_tsig = TSIG::stub(self.request_id, self.time, &self.signer);
+        let mut stub_tsig = TSIG::stub(
+            self.request_id,
+            self.time,
+            self.signer.algorithm().clone(),
+            self.signer.fudge(),
+        );
         if let Some(err) = self.error {
             stub_tsig.set_error(err);
         }
@@ -137,7 +142,12 @@ struct BadSignatureSigner {
 
 impl ResponseSigner for BadSignatureSigner {
     fn sign(self: Box<Self>, _: &[u8]) -> Result<MessageSignature, ProtoError> {
-        let mut stub_tsig = TSIG::stub(self.request_id, self.time, &self.signer);
+        let mut stub_tsig = TSIG::stub(
+            self.request_id,
+            self.time,
+            self.signer.algorithm().clone(),
+            self.signer.fudge(),
+        );
         stub_tsig.set_error(TsigError::BadSig);
         Ok(MessageSignature::Tsig(Box::new(make_tsig_record(
             self.signer.signer_name().clone(),
@@ -363,7 +373,12 @@ impl MessageSigner for TSigner {
     ) -> ProtoResult<(MessageSignature, Option<MessageVerifier>)> {
         debug!("signing message: {:?}", message);
 
-        let pre_tsig = TSIG::stub(message.id(), current_time, self);
+        let pre_tsig = TSIG::stub(
+            message.id(),
+            current_time,
+            self.algorithm().clone(),
+            self.fudge(),
+        );
         let mut signature = self
             .sign_message(message, &pre_tsig)
             .map_err(|err| ProtoError::from(err.to_string()))?;

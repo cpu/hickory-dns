@@ -16,7 +16,6 @@ use core::{convert::TryInto, fmt};
 use serde::{Deserialize, Serialize};
 
 use super::DNSSECRData;
-use crate::dnssec::tsig::TSigner;
 use crate::op::MessageSignature;
 use crate::{
     dnssec::{DnsSecError, ring_like::hmac},
@@ -157,16 +156,8 @@ pub struct TSIG {
 }
 
 impl TSIG {
-    pub(crate) fn stub(oid: u16, time: u64, signer: &TSigner) -> Self {
-        TSIG::new(
-            signer.algorithm().clone(),
-            time,
-            signer.fudge(),
-            Vec::new(),
-            oid,
-            None,
-            Vec::new(),
-        )
+    pub(crate) fn stub(oid: u16, time: u64, algorithm: TsigAlgorithm, fudge: u16) -> Self {
+        TSIG::new(algorithm, time, fudge, Vec::new(), oid, None, Vec::new())
     }
 
     /// Constructs a new TSIG
