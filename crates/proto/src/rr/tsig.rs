@@ -14,21 +14,28 @@
 //! - Time checking is not performed in the TSIG implementation but by the caller.
 
 use alloc::boxed::Box;
+#[cfg(feature = "__dnssec")]
 use alloc::string::ToString;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+#[cfg(feature = "__dnssec")]
 use core::ops::Range;
 
+#[cfg(feature = "__dnssec")]
 use tracing::debug;
 
-use super::DnsSecError;
-use crate::error::{ProtoError, ProtoResult};
-use crate::op::{DnsResponse, Message, MessageSigner, MessageVerifier, ResponseSigner};
+use crate::error::ProtoError;
+#[cfg(feature = "__dnssec")]
+use crate::error::ProtoResult;
+#[cfg(feature = "__dnssec")]
+use crate::op::{DnsResponse, MessageVerifier};
+use crate::op::{Message, OpCode, ResponseSigner};
 use crate::rr::rdata::tsig::TsigError;
-use crate::rr::rdata::tsig::{
-    TSIG, TsigAlgorithm, make_tsig_record, message_tbs, signed_bitmessage_to_buf,
-};
-use crate::rr::{Name, Record};
+use crate::rr::rdata::tsig::{TSIG, TsigAlgorithm};
+#[cfg(feature = "__dnssec")]
+use crate::rr::rdata::tsig::{make_tsig_record, message_tbs, signed_bitmessage_to_buf};
+use crate::rr::{Name, Record, RecordType};
+#[cfg(feature = "__dnssec")]
 use crate::serialize::binary::BinEncoder;
 
 /// Context for a TSIG response, used to construct a TSIG response signer
@@ -85,6 +92,7 @@ impl TSigResponseContext {
 
 /// A TSIG response signer constructed in response to a specific request
 #[non_exhaustive]
+#[cfg_attr(not(feature = "__dnssec"), allow(dead_code))]
 struct TSigResponseSigner {
     /// The validated MAC of the TSIG RR from the request
     request_mac: Vec<u8>,
@@ -99,6 +107,7 @@ struct TSigResponseSigner {
 }
 
 impl ResponseSigner for TSigResponseSigner {
+    #[cfg(feature = "__dnssec")]
     fn sign(self: Box<Self>, response: &[u8]) -> Result<Box<Record<TSIG>>, ProtoError> {
         // BadSig and BadKey are both spec'd to return **unsigned** TSIG RRs.
         debug_assert!(!matches!(
@@ -130,8 +139,16 @@ impl ResponseSigner for TSigResponseSigner {
             resp_tsig,
         )))
     }
+
+    #[cfg(not(feature = "__dnssec"))]
+    fn sign(self: Box<Self>, _response: &[u8]) -> Result<Box<Record<TSIG>>, ProtoError> {
+        Err(ProtoError::from(
+            "TSIG signing requires the __dnssec feature",
+        ))
+    }
 }
 
+#[cfg_attr(not(feature = "__dnssec"), allow(dead_code))]
 struct BadSignatureSigner {
     signer: TSigner,
     request_id: u16,
@@ -139,6 +156,7 @@ struct BadSignatureSigner {
 }
 
 impl ResponseSigner for BadSignatureSigner {
+    #[cfg(feature = "__dnssec")]
     fn sign(self: Box<Self>, _: &[u8]) -> Result<Box<Record<TSIG>>, ProtoError> {
         let mut stub_tsig = TSIG::stub(
             self.request_id,
@@ -152,8 +170,16 @@ impl ResponseSigner for BadSignatureSigner {
             stub_tsig,
         )))
     }
+
+    #[cfg(not(feature = "__dnssec"))]
+    fn sign(self: Box<Self>, _response: &[u8]) -> Result<Box<Record<TSIG>>, ProtoError> {
+        Err(ProtoError::from(
+            "TSIG signing requires the __dnssec feature",
+        ))
+    }
 }
 
+#[cfg_attr(not(feature = "__dnssec"), allow(dead_code))]
 struct UnknownKeySigner {
     time: u64,
     key_name: Name,
@@ -161,6 +187,7 @@ struct UnknownKeySigner {
 }
 
 impl ResponseSigner for UnknownKeySigner {
+    #[cfg(feature = "__dnssec")]
     fn sign(self: Box<Self>, _: &[u8]) -> Result<Box<Record<TSIG>>, ProtoError> {
         // "If a non-forwarding server does not recognize the key or algorithm used by the
         // client (or recognizes the algorithm but does not implement it), the server MUST
@@ -184,6 +211,13 @@ impl ResponseSigner for UnknownKeySigner {
             ),
         )))
     }
+
+    #[cfg(not(feature = "__dnssec"))]
+    fn sign(self: Box<Self>, _response: &[u8]) -> Result<Box<Record<TSIG>>, ProtoError> {
+        Err(ProtoError::from(
+            "TSIG signing requires the __dnssec feature",
+        ))
+    }
 }
 
 /// Struct to pass to a client for it to authenticate requests using TSIG.
@@ -198,6 +232,7 @@ struct TSignerInner {
 }
 
 impl TSigner {
+    #[cfg(feature = "__dnssec")]
     /// Create a new TSigner from its parts
     ///
     /// # Arguments
@@ -211,9 +246,9 @@ impl TSigner {
         algorithm: TsigAlgorithm,
         mut signer_name: Name,
         fudge: u16,
-    ) -> Result<Self, DnsSecError> {
+    ) -> Result<Self, ProtoError> {
         if !algorithm.supported() {
-            return Err(DnsSecError::TsigUnsupportedMacAlgorithm(algorithm));
+            return Err(ProtoError::TsigUnsupportedMacAlgorithm(algorithm));
         }
 
         signer_name.set_fqdn(true);
@@ -249,18 +284,24 @@ impl TSigner {
     }
 
     /// Compute authentication tag for a buffer
-    pub fn sign(&self, tbs: &[u8]) -> Result<Vec<u8>, DnsSecError> {
+    #[cfg(feature = "__dnssec")]
+    pub fn sign(&self, tbs: &[u8]) -> Result<Vec<u8>, ProtoError> {
         self.0.algorithm.mac_data(&self.0.key, tbs)
     }
 
-    /// Compute authentication tag for a message
-    pub fn sign_message(&self, message: &Message, pre_tsig: &TSIG) -> Result<Vec<u8>, DnsSecError> {
-        self.sign(&message_tbs(message, pre_tsig, &self.0.signer_name)?)
+    /// Verify hmac in constant time to prevent timing attacks
+    #[cfg(feature = "__dnssec")]
+    pub fn verify(&self, tbv: &[u8], tag: &[u8]) -> Result<(), ProtoError> {
+        self.0.algorithm.verify_mac(&self.0.key, tbv, tag)
     }
 
-    /// Verify hmac in constant time to prevent timing attacks
-    pub fn verify(&self, tbv: &[u8], tag: &[u8]) -> Result<(), DnsSecError> {
-        self.0.algorithm.verify_mac(&self.0.key, tbv, tag)
+    /// Returns true if the `TSigner` should sign the given `Message`
+    pub fn should_sign_message(&self, message: &Message) -> bool {
+        [OpCode::Update, OpCode::Notify].contains(&message.op_code())
+            || message
+                .queries()
+                .iter()
+                .any(|q| [RecordType::AXFR, RecordType::IXFR].contains(&q.query_type()))
     }
 
     /// Verify the message is correctly signed
@@ -285,19 +326,20 @@ impl TSigner {
     ///   fudge value.
     ///
     /// [RFC 8945 Section 5.2.3]: https://www.rfc-editor.org/rfc/rfc8945.html#section-5.2.3
+    #[cfg(feature = "__dnssec")]
     pub fn verify_message_byte(
         &self,
         message: &[u8],
         previous_hash: Option<&[u8]>,
         first_message: bool,
-    ) -> Result<(Vec<u8>, u64, Range<u64>), DnsSecError> {
+    ) -> Result<(Vec<u8>, u64, Range<u64>), ProtoError> {
         let (tbv, record) = signed_bitmessage_to_buf(message, previous_hash, first_message)?;
         let tsig = record.data();
 
         // https://tools.ietf.org/html/rfc8945#section-5.2
         // 1.  Check key
         if record.name() != &self.0.signer_name || tsig.algorithm() != &self.0.algorithm {
-            return Err(DnsSecError::TsigWrongKey);
+            return Err(ProtoError::TsigWrongKey);
         }
 
         // 2.  Check MAC
@@ -307,7 +349,7 @@ impl TSigner {
         // MAC tags offer less security than their full-width counterparts, and the spec includes
         // them only for backwards compatibility.
         if tsig.mac().len() < tsig.algorithm().output_len()? {
-            return Err(DnsSecError::from(
+            return Err(ProtoError::Crypto(
                 "Please file an issue with https://github.com/hickory-dns/hickory-dns to support truncated HMACs with TSIG",
             ));
         }
@@ -339,6 +381,7 @@ impl TSigner {
     /// `encoded_response` is the to-be-signed bytes of the constructed response.
     /// `resp_id` is the ID of the response to use for the TSIG RR stub.
     /// `now` is the timestamp to use for the TSIG RR stub.
+    #[cfg(feature = "__dnssec")]
     pub fn encode_response_tbs(
         &self,
         previous_mac: &[u8],
@@ -361,10 +404,10 @@ impl TSigner {
 
         Ok(tbs_buf)
     }
-}
 
-impl MessageSigner for TSigner {
-    fn sign_message(
+    /// Sign a `Message`
+    #[cfg(feature = "__dnssec")]
+    pub fn sign_message(
         &self,
         message: &Message,
         current_time: u64,
@@ -378,7 +421,7 @@ impl MessageSigner for TSigner {
             self.fudge(),
         );
         let mut signature = self
-            .sign_message(message, &pre_tsig)
+            .sign(&message_tbs(message, &pre_tsig, &self.0.signer_name)?)
             .map_err(|err| ProtoError::from(err.to_string()))?;
         let tsig = make_tsig_record(
             self.0.signer_name.clone(),
@@ -404,7 +447,7 @@ impl MessageSigner for TSigner {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "__dnssec"))]
 mod tests {
     #![allow(clippy::dbg_macro, clippy::print_stdout)]
 

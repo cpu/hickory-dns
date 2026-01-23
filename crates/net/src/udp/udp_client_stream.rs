@@ -13,17 +13,15 @@ use core::time::Duration;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use futures_util::{FutureExt, Stream, StreamExt, pin_mut, stream::FuturesUnordered};
-use tracing::{debug, trace, warn};
-
 use crate::error::NetError;
-use crate::proto::op::{
-    DEFAULT_RETRY_FLOOR, DnsRequest, DnsResponse, Message, MessageSigner, SerialMessage,
-};
+use crate::proto::op::{DEFAULT_RETRY_FLOOR, DnsRequest, DnsResponse, Message, SerialMessage};
 use crate::runtime::{DnsUdpSocket, RuntimeProvider, Spawn, Time};
 use crate::udp::MAX_RECEIVE_BUFFER_SIZE;
 use crate::udp::udp_stream::NextRandomUdpSocket;
 use crate::xfer::{DnsExchange, DnsRequestSender, DnsResponseStream};
+use futures_util::{FutureExt, Stream, StreamExt, pin_mut, stream::FuturesUnordered};
+use hickory_proto::rr::tsig::TSigner;
+use tracing::{debug, trace, warn};
 
 /// A UDP client stream of DNS binary packets.
 ///
@@ -35,7 +33,7 @@ pub struct UdpClientStream<P> {
     name_server: SocketAddr,
     timeout: Duration,
     is_shutdown: bool,
-    signer: Option<Arc<dyn MessageSigner>>,
+    signer: Option<TSigner>,
     bind_addr: Option<SocketAddr>,
     avoid_local_ports: Arc<HashSet<u16>>,
     os_port_selection: bool,
@@ -121,7 +119,7 @@ struct UdpRequest<P> {
     name_server: SocketAddr,
     request: DnsRequest,
     provider: P,
-    signer: Option<Arc<dyn MessageSigner>>,
+    signer: Option<TSigner>,
     now: u64,
     bind_addr: Option<SocketAddr>,
     os_port_selection: bool,
@@ -157,7 +155,7 @@ impl<P: RuntimeProvider> Request for UdpRequest<P> {
 
         let mut verifier = None;
         if let Some(signer) = &self.signer {
-            match request.finalize(&**signer, self.now) {
+            match request.finalize(signer, self.now) {
                 Ok(answer_verifier) => verifier = answer_verifier,
                 Err(e) => {
                     debug!("could not sign message: {}", e);
@@ -336,7 +334,7 @@ impl<P: RuntimeProvider> Request for UdpRequest<P> {
 pub struct UdpClientStreamBuilder<P> {
     name_server: SocketAddr,
     timeout: Option<Duration>,
-    signer: Option<Arc<dyn MessageSigner>>,
+    signer: Option<TSigner>,
     bind_addr: Option<SocketAddr>,
     avoid_local_ports: Arc<HashSet<u16>>,
     os_port_selection: bool,
@@ -353,7 +351,7 @@ impl<P: RuntimeProvider> UdpClientStreamBuilder<P> {
     }
 
     /// Sets the message finalizer to be applied to queries.
-    pub fn with_signer(self, signer: Option<Arc<dyn MessageSigner>>) -> Self {
+    pub fn with_signer(self, signer: Option<TSigner>) -> Self {
         Self {
             name_server: self.name_server,
             timeout: self.timeout,

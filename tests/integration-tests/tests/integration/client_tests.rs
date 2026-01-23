@@ -25,8 +25,6 @@ use hickory_net::udp::UdpClientStream;
 use hickory_net::xfer::{DnsHandle, DnsMultiplexer};
 #[cfg(feature = "__dnssec")]
 use hickory_proto::dnssec::TrustAnchors;
-#[cfg(all(feature = "__dnssec", feature = "sqlite"))]
-use hickory_proto::op::MessageSigner;
 #[cfg(feature = "__dnssec")]
 use hickory_proto::op::ResponseCode;
 use hickory_proto::op::{DnsRequest, Edns, Message, Query};
@@ -53,7 +51,7 @@ impl TestClientConnection {
 
     async fn to_multiplexer(
         &self,
-        signer: Option<Arc<dyn MessageSigner>>,
+        signer: Option<hickory_proto::dnssec::TSigner>,
     ) -> DnsMultiplexer<TestClientStream> {
         let (future, handle) = TestClientStream::new(self.catalog.clone());
         let client_stream = future.await.expect("failed to connect");
@@ -411,17 +409,15 @@ async fn create_tsig_ready_client(mut catalog: Catalog) -> (Client<TokioRuntimeP
     let origin = handler.origin().clone();
 
     let secret_key = b"test_secret_key_for_client_tests".to_vec();
-    let signer = Arc::new(
-        TSigner::new(
-            secret_key,
-            TsigAlgorithm::HmacSha256,
-            Name::from_str("trusted.example.com.").unwrap(),
-            300,
-        )
-        .unwrap(),
-    );
+    let signer = TSigner::new(
+        secret_key,
+        TsigAlgorithm::HmacSha256,
+        Name::from_str("trusted.example.com.").unwrap(),
+        300,
+    )
+    .unwrap();
 
-    handler.set_tsig_signers(vec![(*signer).clone()]);
+    handler.set_tsig_signers(vec![signer.clone()]);
 
     catalog.upsert(handler.origin().clone(), vec![Arc::new(handler)]);
     let multiplexer = TestClientConnection::new(catalog)

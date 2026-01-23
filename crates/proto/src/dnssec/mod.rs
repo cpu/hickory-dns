@@ -35,7 +35,6 @@ mod public_key;
 pub use public_key::{PublicKey, PublicKeyBuf};
 
 pub mod rdata;
-use crate::rr::rdata::tsig::TsigAlgorithm;
 
 mod rsa_public_key;
 
@@ -51,8 +50,7 @@ pub use tbs::TBS;
 mod trust_anchor;
 pub use trust_anchor::TrustAnchors;
 
-mod tsig;
-pub use tsig::{TSigResponseContext, TSigner};
+pub use crate::rr::tsig::{TSigResponseContext, TSigner};
 
 mod verifier;
 pub use verifier::Verifier;
@@ -347,15 +345,6 @@ pub enum DnsSecError {
     /// A ring error
     #[error("ring error: {0}")]
     RingUnspecified(#[from] ring_like::Unspecified),
-
-    /// Tsig unsupported mac algorithm
-    /// Supported algorithm documented in `TsigAlgorithm::supported` function.
-    #[error("Tsig unsupported mac algorithm")]
-    TsigUnsupportedMacAlgorithm(TsigAlgorithm),
-
-    /// Tsig key verification failed
-    #[error("Tsig key wrong key error")]
-    TsigWrongKey,
 }
 
 impl From<String> for DnsSecError {
@@ -381,8 +370,6 @@ impl Clone for DnsSecError {
             Proto(proto) => Proto(proto.clone()),
             RingKeyRejected(r) => Msg(format!("Ring rejected key: {r}")),
             RingUnspecified(_r) => RingUnspecified(ring_like::Unspecified),
-            TsigUnsupportedMacAlgorithm(alg) => TsigUnsupportedMacAlgorithm(alg.clone()),
-            TsigWrongKey => TsigWrongKey,
         }
     }
 }
@@ -428,18 +415,7 @@ pub(crate) use ring_impl as ring_like;
 #[cfg(feature = "dnssec-aws-lc-rs")]
 #[cfg_attr(feature = "dnssec-ring", allow(unused_imports))]
 pub(crate) mod aws_lc_rs_impl {
-    pub(crate) use aws_lc_rs::{
-        digest,
-        error::{KeyRejected, Unspecified},
-        hmac,
-        rand::SystemRandom,
-        rsa::PublicKeyComponents,
-        signature::{
-            self, ECDSA_P256_SHA256_FIXED_SIGNING, ECDSA_P384_SHA384_FIXED_SIGNING,
-            ED25519_PUBLIC_KEY_LEN, EcdsaKeyPair, Ed25519KeyPair, KeyPair, RSA_PKCS1_SHA256,
-            RSA_PKCS1_SHA512, RsaKeyPair,
-        },
-    };
+    pub(crate) use aws_lc_rs::signature::KeyPair;
 }
 
 #[cfg(feature = "dnssec-ring")]

@@ -20,6 +20,8 @@ use core::num::ParseIntError;
 use thiserror::Error;
 
 use crate::op::Header;
+#[cfg(feature = "__dnssec")]
+use crate::rr::rdata::tsig::TsigAlgorithm;
 use crate::serialize::binary::DecodeError;
 
 /// An alias for results returned by functions of this crate
@@ -97,6 +99,17 @@ pub enum ProtoError {
     #[cfg(target_os = "android")]
     #[error("JNI call error: {0}")]
     Jni(Arc<jni::errors::Error>),
+
+    /// Tsig unsupported mac algorithm
+    /// Supported algorithm documented in `TsigAlgorithm::supported` function.
+    #[cfg(feature = "__dnssec")]
+    #[error("Tsig unsupported mac algorithm")]
+    TsigUnsupportedMacAlgorithm(TsigAlgorithm),
+
+    /// Tsig key verification failed
+    #[cfg(feature = "__dnssec")]
+    #[error("Tsig key wrong key error")]
+    TsigWrongKey,
 }
 
 impl From<String> for ProtoError {

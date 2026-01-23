@@ -19,6 +19,7 @@ pub mod resource;
 mod rr_key;
 mod rr_set;
 pub mod serial_number;
+pub mod tsig;
 
 use core::fmt::{Debug, Display};
 

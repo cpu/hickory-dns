@@ -8,15 +8,19 @@
 //! `DnsMultiplexer` and associated types implement the state machines for sending DNS messages while using the underlying streams.
 
 use core::{
-    borrow::Borrow,
     marker::Unpin,
     pin::Pin,
     task::{Context, Poll},
     time::Duration,
 };
 use std::collections::{HashMap, hash_map::Entry};
-use std::sync::Arc;
 
+use super::{
+    BufDnsStreamHandle, CHANNEL_BUFFER_SIZE, DnsClientStream, DnsRequestSender, DnsResponseStream,
+    ignore_send,
+};
+use crate::proto::op::{DnsRequest, DnsResponse, MessageVerifier, SerialMessage};
+use crate::{DnsStreamHandle, error::NetError, runtime::Time};
 use futures_channel::mpsc;
 use futures_util::{
     FutureExt,
@@ -24,15 +28,9 @@ use futures_util::{
     ready,
     stream::{Stream, StreamExt},
 };
+use hickory_proto::rr::tsig::TSigner;
 use rand::Rng;
 use tracing::debug;
-
-use super::{
-    BufDnsStreamHandle, CHANNEL_BUFFER_SIZE, DnsClientStream, DnsRequestSender, DnsResponseStream,
-    ignore_send,
-};
-use crate::proto::op::{DnsRequest, DnsResponse, MessageSigner, MessageVerifier, SerialMessage};
-use crate::{DnsStreamHandle, error::NetError, runtime::Time};
 
 const QOS_MAX_RECEIVE_MSGS: usize = 100; // max number of messages to receive from the UDP socket
 
@@ -92,7 +90,7 @@ pub struct DnsMultiplexer<S> {
     timeout_duration: Duration,
     stream_handle: BufDnsStreamHandle,
     active_requests: HashMap<u16, ActiveRequest>,
-    signer: Option<Arc<dyn MessageSigner>>,
+    signer: Option<TSigner>,
     is_shutdown: bool,
 }
 
@@ -104,12 +102,8 @@ impl<S: DnsClientStream> DnsMultiplexer<S> {
     /// * `stream` - A stream of bytes that can be used to send/receive DNS messages
     ///   (see TcpClientStream or UdpClientStream)
     /// * `stream_handle` - The handle for the `stream` on which bytes can be sent/received.
-    /// * `signer` - An optional signer for requests, needed for Updates with Sig0, otherwise not needed
-    pub fn new(
-        stream: S,
-        stream_handle: BufDnsStreamHandle,
-        signer: Option<Arc<dyn MessageSigner>>,
-    ) -> Self {
+    /// * `signer` - An optional signer for requests, needed for Updates with TSIG, otherwise not needed
+    pub fn new(stream: S, stream_handle: BufDnsStreamHandle, signer: Option<TSigner>) -> Self {
         Self::with_timeout(stream, stream_handle, Duration::from_secs(5), signer)
     }
 
@@ -122,12 +116,12 @@ impl<S: DnsClientStream> DnsMultiplexer<S> {
     /// * `stream_handle` - The handle for the `stream` on which bytes can be sent/received.
     /// * `timeout_duration` - All requests may fail due to lack of response, this is the time to
     ///   wait for a response before canceling the request.
-    /// * `signer` - An optional signer for requests, needed for Updates with Sig0, otherwise not needed
+    /// * `signer` - An optional signer for requests, needed for Updates with TSIG, otherwise not needed
     pub fn with_timeout(
         stream: S,
         stream_handle: BufDnsStreamHandle,
         timeout_duration: Duration,
-        signer: Option<Arc<dyn MessageSigner>>,
+        signer: Option<TSigner>,
     ) -> Self {
         Self {
             stream,
@@ -204,7 +198,7 @@ where
     stream: F,
     stream_handle: Option<BufDnsStreamHandle>,
     timeout_duration: Duration,
-    signer: Option<Arc<dyn MessageSigner>>,
+    signer: Option<TSigner>,
 }
 
 impl<F, S> Future for DnsMultiplexerConnect<F, S>
@@ -254,7 +248,7 @@ impl<S: DnsClientStream> DnsRequestSender for DnsMultiplexer<S> {
         let mut verifier = None;
         if let Some(signer) = &self.signer {
             if signer.should_sign_message(&request) {
-                match request.finalize(signer.borrow(), now) {
+                match request.finalize(signer, now) {
                     Ok(answer_verifier) => verifier = answer_verifier,
                     Err(e) => {
                         debug!("could not sign message: {}", e);

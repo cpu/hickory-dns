@@ -36,6 +36,7 @@ fn update_zone_handler(
     handler: &mut impl ZoneHandler,
 ) -> Result<bool, ResponseCode> {
     let now = TokioTime::current_time();
+    #[cfg(feature = "__dnssec")]
     message.finalize(key, now).expect("failed to sign message");
     let bytes = message.to_bytes().unwrap();
     let request = Request::from_bytes(

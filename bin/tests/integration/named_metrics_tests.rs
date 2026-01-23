@@ -41,12 +41,9 @@ use hickory_proto::dnssec::{Algorithm, SigningKey, TSigner, TrustAnchors, crypto
 use hickory_proto::op::DnsResponse;
 #[cfg(all(feature = "__dnssec", feature = "sqlite"))]
 use hickory_proto::rr::Record;
-use hickory_proto::{
-    op::MessageSigner,
-    rr::{
-        DNSClass, Name, RData, RecordType,
-        rdata::{A, name::PTR},
-    },
+use hickory_proto::rr::{
+    DNSClass, Name, RData, RecordType,
+    rdata::{A, name::PTR},
 };
 #[cfg(all(feature = "__tls", feature = "recursor", feature = "metrics"))]
 use hickory_resolver::metrics::opportunistic_encryption::{
@@ -514,7 +511,7 @@ async fn test_updates() {
         )
         .unwrap();
 
-        let client = create_local_client(&server.ports, Some(Arc::new(signer))).await;
+        let client = create_local_client(&server.ports, Some(signer)).await;
         let mut client = DnssecDnsHandle::with_trust_anchor(client, Arc::new(trust_anchor));
 
         let rrset_create = Record::from_rdata(
@@ -708,7 +705,7 @@ async fn test_recursor_dnssec_metrics() {
 
 async fn create_local_client(
     socket_ports: &SocketPorts,
-    signer: Option<Arc<dyn MessageSigner>>,
+    signer: Option<TSigner>,
 ) -> Client<TokioRuntimeProvider> {
     let dns_port = socket_ports.get_v4(ServerProtocol::Dns(Protocol::Tcp));
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, dns_port.expect("no dns tcp port")));
