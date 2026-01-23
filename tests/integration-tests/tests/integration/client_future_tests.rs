@@ -26,8 +26,10 @@ use hickory_net::{
     xfer::{DnsExchangeBackground, DnsMultiplexer},
 };
 #[cfg(all(feature = "__dnssec", feature = "sqlite"))]
+use hickory_proto::rr::rdata::tsig::TsigAlgorithm;
+#[cfg(all(feature = "__dnssec", feature = "sqlite"))]
 use hickory_proto::{
-    dnssec::{TSigner, rdata::tsig::TsigAlgorithm},
+    dnssec::TSigner,
     rr::{RData, Record, rdata::A},
 };
 use hickory_proto::{

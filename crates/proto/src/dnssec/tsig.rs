@@ -22,15 +22,15 @@ use core::ops::Range;
 use tracing::debug;
 
 use super::DnsSecError;
-use super::rdata::tsig::{
-    TSIG, TsigAlgorithm, make_tsig_record, message_tbs, signed_bitmessage_to_buf,
-};
-use crate::dnssec::rdata::tsig::TsigError;
 use crate::error::{ProtoError, ProtoResult};
 use crate::op::{
     DnsResponse, Message, MessageSignature, MessageSigner, MessageVerifier, ResponseSigner,
 };
 use crate::rr::Name;
+use crate::rr::rdata::tsig::TsigError;
+use crate::rr::rdata::tsig::{
+    TSIG, TsigAlgorithm, make_tsig_record, message_tbs, signed_bitmessage_to_buf,
+};
 use crate::serialize::binary::BinEncoder;
 
 /// Context for a TSIG response, used to construct a TSIG response signer

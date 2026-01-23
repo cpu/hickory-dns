@@ -36,9 +36,7 @@ use hickory_net::{
     xfer::Protocol,
 };
 #[cfg(all(feature = "__dnssec", feature = "sqlite"))]
-use hickory_proto::dnssec::{
-    Algorithm, SigningKey, TSigner, TrustAnchors, crypto::RsaSigningKey, rdata::tsig::TsigAlgorithm,
-};
+use hickory_proto::dnssec::{Algorithm, SigningKey, TSigner, TrustAnchors, crypto::RsaSigningKey};
 #[cfg(feature = "blocklist")]
 use hickory_proto::op::DnsResponse;
 #[cfg(all(feature = "__dnssec", feature = "sqlite"))]
@@ -58,6 +56,8 @@ use hickory_resolver::metrics::opportunistic_encryption::{
 use test_support::subscribe;
 
 use hickory_dns::metrics::{BUILD_INFO, CONFIG_INFO, ZONES_TOTAL};
+#[cfg(all(feature = "__dnssec", feature = "sqlite"))]
+use hickory_proto::rr::rdata::tsig::TsigAlgorithm;
 #[cfg(all(feature = "recursor", feature = "__dnssec", feature = "metrics"))]
 use hickory_resolver::metrics::recursor::{
     BOGUS_ANSWERS_TOTAL, INDETERMINATE_ANSWERS_TOTAL, INSECURE_ANSWERS_TOTAL, SECURE_ANSWERS_TOTAL,

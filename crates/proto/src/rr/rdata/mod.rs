@@ -29,6 +29,7 @@ pub mod srv;
 pub mod sshfp;
 pub mod svcb;
 pub mod tlsa;
+pub mod tsig;
 pub mod txt;
 
 pub use self::a::A;

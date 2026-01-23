@@ -35,7 +35,7 @@ mod public_key;
 pub use public_key::{PublicKey, PublicKeyBuf};
 
 pub mod rdata;
-use rdata::tsig::TsigAlgorithm;
+use crate::rr::rdata::tsig::TsigAlgorithm;
 
 mod rsa_public_key;
 

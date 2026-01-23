@@ -12,9 +12,9 @@ use hickory_net::{
     runtime::{Time, TokioTime},
     xfer::Protocol,
 };
+use hickory_proto::rr::rdata::tsig::TsigAlgorithm;
 use hickory_proto::{
     dnssec::TSigner,
-    dnssec::rdata::tsig::TsigAlgorithm,
     op::{Header, Message, MessageType, OpCode, Query, ResponseCode, update_message},
     rr::{
         DNSClass, Name, RData, Record, RecordSet, RecordType,

@@ -18,23 +18,13 @@ use std::{
     sync::Arc,
 };
 
-use futures_util::lock::Mutex;
-use serde::Deserialize;
-use tracing::{debug, error, info, warn};
-
 #[cfg(feature = "metrics")]
 use crate::metrics::PersistentStoreMetrics;
 #[cfg(feature = "__dnssec")]
 use crate::{
     dnssec::NxProofKind,
     proto::{
-        dnssec::{
-            DnsSecResult, DnssecSigner, TSigResponseContext, TSigner,
-            rdata::{
-                TSIG,
-                tsig::{TsigAlgorithm, TsigError},
-            },
-        },
+        dnssec::{DnsSecResult, DnssecSigner, TSigResponseContext, TSigner},
         op::MessageSignature,
     },
     zone_handler::{DnssecZoneHandler, Nsec3QueryInfo, UpdateRequest},
@@ -55,6 +45,13 @@ use crate::{
         ZoneTransfer, ZoneType,
     },
 };
+use futures_util::lock::Mutex;
+#[cfg(feature = "__dnssec")]
+use hickory_proto::rr::rdata::tsig::TSIG;
+#[cfg(feature = "__dnssec")]
+use hickory_proto::rr::rdata::tsig::{TsigAlgorithm, TsigError};
+use serde::Deserialize;
+use tracing::{debug, error, info, warn};
 
 pub mod persistence;
 pub use persistence::{Journal, PersistenceError};
