@@ -9,13 +9,14 @@
 
 use core::fmt::Debug;
 
+use crate::rr::rdata::tsig::TSIG;
 #[cfg(any(feature = "std", feature = "no-std-rand"))]
 use crate::{
     op::{Edns, OpCode},
     rr::{DNSClass, Name, RData, RecordSet, RecordType, rdata::SOA},
 };
 use crate::{
-    op::{Message, MessageSignature, Query},
+    op::{Message, Query},
     rr::Record,
 };
 
@@ -68,7 +69,7 @@ pub trait UpdateMessage: Debug {
     /// Return the message's signature (if any)
     ///
     /// This is used to authenticate update messages.
-    fn signature(&self) -> &MessageSignature;
+    fn signature(&self) -> Option<&Record<TSIG>>;
 }
 
 /// to reduce errors in using the Message struct as an Update, this will do the call throughs
@@ -126,7 +127,7 @@ impl UpdateMessage for Message {
         self.additionals()
     }
 
-    fn signature(&self) -> &MessageSignature {
+    fn signature(&self) -> Option<&Record<TSIG>> {
         self.signature()
     }
 }

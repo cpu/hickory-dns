@@ -23,14 +23,12 @@ use tracing::debug;
 
 use super::DnsSecError;
 use crate::error::{ProtoError, ProtoResult};
-use crate::op::{
-    DnsResponse, Message, MessageSignature, MessageSigner, MessageVerifier, ResponseSigner,
-};
-use crate::rr::Name;
+use crate::op::{DnsResponse, Message, MessageSigner, MessageVerifier, ResponseSigner};
 use crate::rr::rdata::tsig::TsigError;
 use crate::rr::rdata::tsig::{
     TSIG, TsigAlgorithm, make_tsig_record, message_tbs, signed_bitmessage_to_buf,
 };
+use crate::rr::{Name, Record};
 use crate::serialize::binary::BinEncoder;
 
 /// Context for a TSIG response, used to construct a TSIG response signer
@@ -101,7 +99,7 @@ struct TSigResponseSigner {
 }
 
 impl ResponseSigner for TSigResponseSigner {
-    fn sign(self: Box<Self>, response: &[u8]) -> Result<MessageSignature, ProtoError> {
+    fn sign(self: Box<Self>, response: &[u8]) -> Result<Box<Record<TSIG>>, ProtoError> {
         // BadSig and BadKey are both spec'd to return **unsigned** TSIG RRs.
         debug_assert!(!matches!(
             self.error,
@@ -127,10 +125,10 @@ impl ResponseSigner for TSigResponseSigner {
                 .map_err(|e| ProtoError::from(e.to_string()))?,
         );
 
-        Ok(MessageSignature::Tsig(Box::new(make_tsig_record(
+        Ok(Box::new(make_tsig_record(
             self.signer.signer_name().clone(),
             resp_tsig,
-        ))))
+        )))
     }
 }
 
@@ -141,7 +139,7 @@ struct BadSignatureSigner {
 }
 
 impl ResponseSigner for BadSignatureSigner {
-    fn sign(self: Box<Self>, _: &[u8]) -> Result<MessageSignature, ProtoError> {
+    fn sign(self: Box<Self>, _: &[u8]) -> Result<Box<Record<TSIG>>, ProtoError> {
         let mut stub_tsig = TSIG::stub(
             self.request_id,
             self.time,
@@ -149,10 +147,10 @@ impl ResponseSigner for BadSignatureSigner {
             self.signer.fudge(),
         );
         stub_tsig.set_error(TsigError::BadSig);
-        Ok(MessageSignature::Tsig(Box::new(make_tsig_record(
+        Ok(Box::new(make_tsig_record(
             self.signer.signer_name().clone(),
             stub_tsig,
-        ))))
+        )))
     }
 }
 
@@ -163,7 +161,7 @@ struct UnknownKeySigner {
 }
 
 impl ResponseSigner for UnknownKeySigner {
-    fn sign(self: Box<Self>, _: &[u8]) -> Result<MessageSignature, ProtoError> {
+    fn sign(self: Box<Self>, _: &[u8]) -> Result<Box<Record<TSIG>>, ProtoError> {
         // "If a non-forwarding server does not recognize the key or algorithm used by the
         // client (or recognizes the algorithm but does not implement it), the server MUST
         // generate an error response with RCODE 9 (NOTAUTH) and TSIG ERROR 17 (BADKEY).
@@ -173,7 +171,7 @@ impl ResponseSigner for UnknownKeySigner {
         // should use in the response since we didn't recognize the key name as one
         // of our configured signers. We choose a stand-in algorithm and reflect the
         // unknown key name in absence of further direction.
-        Ok(MessageSignature::Tsig(Box::new(make_tsig_record(
+        Ok(Box::new(make_tsig_record(
             self.key_name.clone(),
             TSIG::new(
                 TsigAlgorithm::HmacSha256,
@@ -184,7 +182,7 @@ impl ResponseSigner for UnknownKeySigner {
                 Some(TsigError::BadKey),
                 Vec::new(),
             ),
-        ))))
+        )))
     }
 }
 
@@ -370,7 +368,7 @@ impl MessageSigner for TSigner {
         &self,
         message: &Message,
         current_time: u64,
-    ) -> ProtoResult<(MessageSignature, Option<MessageVerifier>)> {
+    ) -> ProtoResult<(Box<Record<TSIG>>, Option<MessageVerifier>)> {
         debug!("signing message: {:?}", message);
 
         let pre_tsig = TSIG::stub(
@@ -402,10 +400,7 @@ impl MessageSigner for TSigner {
                 Err(ProtoError::from("tsig validation error: outdated response"))
             }
         };
-        Ok((
-            MessageSignature::Tsig(Box::new(tsig)),
-            Some(Box::new(verifier)),
-        ))
+        Ok((Box::new(tsig), Some(Box::new(verifier))))
     }
 }
 
@@ -413,7 +408,7 @@ impl MessageSigner for TSigner {
 mod tests {
     #![allow(clippy::dbg_macro, clippy::print_stdout)]
 
-    use crate::op::{Message, MessageSignature, Query};
+    use crate::op::{Message, Query};
     use crate::rr::Name;
     use crate::serialize::binary::BinEncodable;
 
@@ -440,11 +435,11 @@ mod tests {
         let signer =
             TSigner::new(sig_key, TsigAlgorithm::HmacSha512, key_name, fudge as u16).unwrap();
 
-        assert_eq!(question.signature(), &MessageSignature::Unsigned);
+        assert!(question.signature().is_none());
         question
             .finalize(&signer, time_begin)
             .expect("should have signed");
-        assert!(matches!(question.signature(), &MessageSignature::Tsig(_)));
+        assert!(question.signature().is_some());
 
         let (_, _, validity_range) = signer
             .verify_message_byte(&question.to_bytes().unwrap(), None, true)
@@ -470,11 +465,11 @@ mod tests {
         let signer =
             TSigner::new(sig_key, TsigAlgorithm::HmacSha512, key_name, fudge as u16).unwrap();
 
-        assert_eq!(question.signature(), &MessageSignature::Unsigned);
+        assert!(question.signature().is_none());
         question
             .finalize(&signer, time_begin)
             .expect("should have signed");
-        assert!(matches!(question.signature(), &MessageSignature::Tsig(_)));
+        assert!(question.signature().is_some());
 
         // this should be ok, it has not been tampered with
         assert!(
@@ -491,11 +486,9 @@ mod tests {
         let (mut question, signer) = get_message_and_signer();
 
         let other_name: Name = Name::from_ascii("other_name.").unwrap();
-        let MessageSignature::Tsig(mut signature) = question.take_signature() else {
-            panic!("should have TSIG signed");
-        };
+        let mut signature = question.take_signature().unwrap();
         signature.set_name(other_name);
-        question.set_signature(MessageSignature::Tsig(signature));
+        question.set_signature(signature);
 
         assert!(
             signer
