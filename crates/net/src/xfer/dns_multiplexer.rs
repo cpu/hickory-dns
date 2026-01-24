@@ -19,7 +19,7 @@ use super::{
     BufDnsStreamHandle, CHANNEL_BUFFER_SIZE, DnsClientStream, DnsRequestSender, DnsResponseStream,
     ignore_send,
 };
-use crate::proto::op::{DnsRequest, DnsResponse, MessageVerifier, SerialMessage};
+use crate::proto::op::{DnsRequest, DnsResponse, SerialMessage};
 use crate::{DnsStreamHandle, error::NetError, runtime::Time};
 use futures_channel::mpsc;
 use futures_util::{
@@ -29,6 +29,8 @@ use futures_util::{
     stream::{Stream, StreamExt},
 };
 use hickory_proto::rr::tsig::TSigner;
+#[cfg(feature = "__dnssec")]
+use hickory_proto::rr::tsig::TsigVerifier;
 use rand::Rng;
 use tracing::debug;
 
@@ -39,7 +41,8 @@ struct ActiveRequest {
     completion: mpsc::Sender<Result<DnsResponse, NetError>>,
     request_id: u16,
     timeout: BoxFuture<'static, ()>,
-    verifier: Option<MessageVerifier>,
+    #[cfg(feature = "__dnssec")]
+    verifier: Option<TsigVerifier>,
 }
 
 impl ActiveRequest {
@@ -47,13 +50,14 @@ impl ActiveRequest {
         completion: mpsc::Sender<Result<DnsResponse, NetError>>,
         request_id: u16,
         timeout: BoxFuture<'static, ()>,
-        verifier: Option<MessageVerifier>,
+        #[cfg(feature = "__dnssec")] verifier: Option<TsigVerifier>,
     ) -> Self {
         Self {
             completion,
             request_id,
             // request,
             timeout,
+            #[cfg(feature = "__dnssec")]
             verifier,
         }
     }
@@ -245,7 +249,9 @@ impl<S: DnsClientStream> DnsRequestSender for DnsMultiplexer<S> {
 
         let now = S::Time::current_time();
 
+        #[cfg(feature = "__dnssec")]
         let mut verifier = None;
+        #[cfg(feature = "__dnssec")]
         if let Some(signer) = &self.signer {
             if signer.should_sign_message(&request) {
                 match request.finalize(signer, now) {
@@ -264,7 +270,13 @@ impl<S: DnsClientStream> DnsRequestSender for DnsMultiplexer<S> {
         let (complete, receiver) = mpsc::channel(CHANNEL_BUFFER_SIZE);
 
         // send the message
-        let active_request = ActiveRequest::new(complete, request.id(), timeout, verifier);
+        let active_request = ActiveRequest::new(
+            complete,
+            request.id(),
+            timeout,
+            #[cfg(feature = "__dnssec")]
+            verifier,
+        );
 
         match request.to_vec() {
             Ok(buffer) => {
@@ -337,13 +349,20 @@ impl<S: DnsClientStream> Stream for DnsMultiplexer<S> {
                             Entry::Occupied(mut request_entry) => {
                                 // send the response, complete the request...
                                 let active_request = request_entry.get_mut();
+                                #[cfg(feature = "__dnssec")]
                                 if let Some(verifier) = &mut active_request.verifier {
-                                    ignore_send(active_request.completion.try_send(
-                                        verifier(response.as_buffer()).map_err(NetError::from),
-                                    ));
+                                    ignore_send(
+                                        active_request.completion.try_send(
+                                            verifier
+                                                .verify(response.as_buffer())
+                                                .map_err(NetError::from),
+                                        ),
+                                    );
                                 } else {
                                     ignore_send(active_request.completion.try_send(Ok(response)));
                                 }
+                                #[cfg(not(feature = "__dnssec"))]
+                                ignore_send(active_request.completion.try_send(Ok(response)));
                             }
                             Entry::Vacant(..) => debug!("unexpected request_id: {}", response.id()),
                         },

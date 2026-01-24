@@ -153,7 +153,9 @@ impl<P: RuntimeProvider> Request for UdpRequest<P> {
         let original_query = self.request.original_query();
         let mut request = self.request.clone();
 
+        #[cfg(feature = "__dnssec")]
         let mut verifier = None;
+        #[cfg(feature = "__dnssec")]
         if let Some(signer) = &self.signer {
             match request.finalize(signer, self.now) {
                 Ok(answer_verifier) => verifier = answer_verifier,
@@ -317,11 +319,11 @@ impl<P: RuntimeProvider> Request for UdpRequest<P> {
             }
 
             debug!("received message id: {}", response.id());
+            #[cfg(feature = "__dnssec")]
             if let Some(mut verifier) = verifier {
-                return Ok(verifier(response_bytes)?);
-            } else {
-                return Ok(response);
+                return Ok(verifier.verify(response_bytes)?);
             }
+            return Ok(response);
         }
 
         Err(NetError::from("udp receive attempts exceeded"))

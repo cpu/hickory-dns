@@ -28,7 +28,7 @@ use crate::error::ProtoError;
 #[cfg(feature = "__dnssec")]
 use crate::error::ProtoResult;
 #[cfg(feature = "__dnssec")]
-use crate::op::{DnsResponse, MessageVerifier};
+use crate::op::DnsResponse;
 use crate::op::{Message, OpCode, ResponseSigner};
 use crate::rr::rdata::tsig::TsigError;
 use crate::rr::rdata::tsig::{TSIG, TsigAlgorithm};
@@ -217,6 +217,55 @@ impl ResponseSigner for UnknownKeySigner {
         Err(ProtoError::from(
             "TSIG signing requires the __dnssec feature",
         ))
+    }
+}
+
+/// A concrete verifier for TSIG-signed DNS responses.
+///
+/// This struct maintains the state necessary to verify a chain of TSIG-signed
+/// responses, tracking the previous MAC and response timestamps to ensure
+/// proper ordering and validation.
+#[cfg(feature = "__dnssec")]
+pub struct TsigVerifier {
+    signer: TSigner,
+    previous_signature: Vec<u8>,
+    remote_time: u64,
+    request_time: u64,
+}
+
+#[cfg(feature = "__dnssec")]
+impl TsigVerifier {
+    /// Verify a TSIG-signed DNS response.
+    ///
+    /// This method validates the TSIG signature on the response, checks that
+    /// the response timestamp is monotonically increasing (for chained responses),
+    /// and validates that the response time falls within the acceptable fudge window.
+    ///
+    /// # Arguments
+    ///
+    /// * `response_bytes` - The raw bytes of the DNS response message
+    ///
+    /// # Returns
+    ///
+    /// Returns the verified `DnsResponse` on success, or a `ProtoError` if
+    /// verification fails.
+    pub fn verify(&mut self, response_bytes: &[u8]) -> ProtoResult<DnsResponse> {
+        let (last_sig, rt, range) = self
+            .signer
+            .verify_message_byte(
+                response_bytes,
+                Some(&self.previous_signature),
+                self.remote_time == 0,
+            )
+            .map_err(|err| ProtoError::from(err.to_string()))?;
+
+        if rt >= self.remote_time && range.contains(&self.request_time) {
+            self.previous_signature = last_sig;
+            self.remote_time = rt;
+            DnsResponse::from_buffer(response_bytes.to_vec())
+        } else {
+            Err(ProtoError::from("tsig validation error: outdated response"))
+        }
     }
 }
 
@@ -411,7 +460,7 @@ impl TSigner {
         &self,
         message: &Message,
         current_time: u64,
-    ) -> ProtoResult<(Box<Record<TSIG>>, Option<MessageVerifier>)> {
+    ) -> ProtoResult<(Box<Record<TSIG>>, Option<TsigVerifier>)> {
         debug!("signing message: {:?}", message);
 
         let pre_tsig = TSIG::stub(
@@ -420,30 +469,22 @@ impl TSigner {
             self.algorithm().clone(),
             self.fudge(),
         );
-        let mut signature = self
+        let signature = self
             .sign(&message_tbs(message, &pre_tsig, &self.0.signer_name)?)
             .map_err(|err| ProtoError::from(err.to_string()))?;
         let tsig = make_tsig_record(
             self.0.signer_name.clone(),
             pre_tsig.set_mac(signature.clone()),
         );
-        let self2 = self.clone();
-        let mut remote_time = 0;
-        let verifier = move |dns_response: &[u8]| {
-            let (last_sig, rt, range) = self2
-                .verify_message_byte(dns_response, Some(signature.as_ref()), remote_time == 0)
-                .map_err(|err| ProtoError::from(err.to_string()))?;
-            if rt >= remote_time && range.contains(&current_time)
-            // this assumes a no-latency answer
-            {
-                signature = last_sig;
-                remote_time = rt;
-                DnsResponse::from_buffer(dns_response.to_vec())
-            } else {
-                Err(ProtoError::from("tsig validation error: outdated response"))
-            }
+
+        let verifier = TsigVerifier {
+            signer: self.clone(),
+            previous_signature: signature,
+            remote_time: 0,
+            request_time: current_time,
         };
-        Ok((Box::new(tsig), Some(Box::new(verifier))))
+
+        Ok((Box::new(tsig), Some(verifier)))
     }
 }
 
