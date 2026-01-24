@@ -28,6 +28,7 @@ use futures_util::{
     ready,
     stream::{Stream, StreamExt},
 };
+#[cfg(feature = "__dnssec")]
 use hickory_proto::rr::tsig::TSigner;
 #[cfg(feature = "__dnssec")]
 use hickory_proto::rr::tsig::TsigVerifier;
@@ -210,6 +211,7 @@ where
     stream: F,
     stream_handle: Option<BufDnsStreamHandle>,
     timeout_duration: Duration,
+    #[cfg(feature = "__dnssec")]
     signer: Option<TSigner>,
 }
 
@@ -231,6 +233,7 @@ where
                 .take()
                 .expect("must not poll after complete"),
             active_requests: HashMap::new(),
+            #[cfg(feature = "__dnssec")]
             signer: self.signer.clone(),
             is_shutdown: false,
         }))
@@ -489,7 +492,7 @@ mod test {
         let mock_response = MockClientStream::new(mock_response, addr).await.unwrap();
         let (handler, receiver) = BufDnsStreamHandle::new(addr);
         let mut multiplexer =
-            DnsMultiplexer::with_timeout(mock_response, handler, Duration::from_millis(100), None);
+            DnsMultiplexer::with_timeout(mock_response, handler, Duration::from_millis(100));
 
         multiplexer.stream.receiver = Some(receiver); // so it can get the correct request id
 

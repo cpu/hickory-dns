@@ -5,8 +5,9 @@ use hickory_net::{
     runtime::{Time, TokioTime},
     xfer::Protocol,
 };
+use hickory_proto::dnssec::TSigResponseContext;
 use hickory_proto::{
-    op::{Message, MessageType, Query, ResponseCode, ResponseSigner},
+    op::{Message, MessageType, Query, ResponseCode},
     rr::{LowerName, Name, RData, Record, RecordSet, RecordType, rdata::A},
     serialize::binary::BinEncodable,
 };
@@ -226,10 +227,7 @@ impl ZoneHandler for TestZoneHandler {
         &self,
         request: &Request,
         lookup_options: LookupOptions,
-    ) -> (
-        LookupControlFlow<AuthLookup>,
-        Option<Box<dyn ResponseSigner>>,
-    ) {
+    ) -> (LookupControlFlow<AuthLookup>, Option<TSigResponseContext>) {
         let request_info = match request.request_info() {
             Ok(info) => info,
             Err(e) => return (LookupControlFlow::Break(Err(e)), None),
@@ -253,10 +251,7 @@ impl ZoneHandler for TestZoneHandler {
         _request_info: Option<&RequestInfo<'_>>,
         lookup_options: LookupOptions,
         last_result: LookupControlFlow<AuthLookup>,
-    ) -> (
-        LookupControlFlow<AuthLookup>,
-        Option<Box<dyn ResponseSigner>>,
-    ) {
+    ) -> (LookupControlFlow<AuthLookup>, Option<TSigResponseContext>) {
         let Some(res) = inner_lookup(name, &self.consult_records, &lookup_options) else {
             return (last_result, None);
         };

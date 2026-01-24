@@ -51,11 +51,11 @@ impl TestClientConnection {
 
     async fn to_multiplexer(
         &self,
-        signer: Option<hickory_proto::dnssec::TSigner>,
+        signer: hickory_proto::dnssec::TSigner,
     ) -> DnsMultiplexer<TestClientStream> {
         let (future, handle) = TestClientStream::new(self.catalog.clone());
         let client_stream = future.await.expect("failed to connect");
-        DnsMultiplexer::new(client_stream, handle, signer)
+        DnsMultiplexer::new(client_stream, handle).with_signer(signer)
     }
 }
 
@@ -78,7 +78,7 @@ async fn udp_dnssec_client(addr: SocketAddr) -> DnssecClient {
 async fn tcp_client(addr: SocketAddr) -> Client<TokioRuntimeProvider> {
     let (future, sender) = TcpClientStream::new(addr, None, None, TokioRuntimeProvider::default());
     let stream = future.await.expect("failed to connect");
-    let multiplexer = DnsMultiplexer::new(stream, sender, None);
+    let multiplexer = DnsMultiplexer::new(stream, sender);
     let (client, driver) = Client::from_sender(multiplexer);
     tokio::spawn(driver);
     client
@@ -88,7 +88,7 @@ async fn tcp_client(addr: SocketAddr) -> Client<TokioRuntimeProvider> {
 async fn tcp_dnssec_client(addr: SocketAddr) -> DnssecClient {
     let (future, sender) = TcpClientStream::new(addr, None, None, TokioRuntimeProvider::default());
     let stream = future.await.expect("failed to connect");
-    let multiplexer = DnsMultiplexer::new(stream, sender, None);
+    let multiplexer = DnsMultiplexer::new(stream, sender);
     let (client, driver) = Client::from_sender(multiplexer);
     let client = DnssecClient::from_client(client, Arc::new(TrustAnchors::default()));
     tokio::spawn(driver);
@@ -277,7 +277,7 @@ async fn test_timeout_query_tcp() {
     match future.await {
         Err(NetError::Timeout) => {}
         Ok(stream) => {
-            let multiplexer = DnsMultiplexer::new(stream, sender, None);
+            let multiplexer = DnsMultiplexer::new(stream, sender);
             let _ = Client::<TokioRuntimeProvider>::from_sender(multiplexer);
             panic!("expected timeout")
         }
@@ -421,7 +421,7 @@ async fn create_tsig_ready_client(mut catalog: Catalog) -> (Client<TokioRuntimeP
 
     catalog.upsert(handler.origin().clone(), vec![Arc::new(handler)]);
     let multiplexer = TestClientConnection::new(catalog)
-        .to_multiplexer(Some(signer))
+        .to_multiplexer(signer)
         .await;
     let (client, driver) = Client::from_sender(multiplexer);
     tokio::spawn(driver);

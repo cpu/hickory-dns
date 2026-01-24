@@ -32,11 +32,15 @@ use crate::error::ProtoResult;
 #[cfg(feature = "__dnssec")]
 use crate::op::DnsResponse;
 use crate::op::{Message, OpCode};
+#[cfg(feature = "__dnssec")]
+use crate::rr::Record;
+#[cfg(feature = "__dnssec")]
+use crate::rr::rdata::tsig::TSIG;
+use crate::rr::rdata::tsig::TsigAlgorithm;
 use crate::rr::rdata::tsig::TsigError;
-use crate::rr::rdata::tsig::{TSIG, TsigAlgorithm};
 #[cfg(feature = "__dnssec")]
 use crate::rr::rdata::tsig::{make_tsig_record, message_tbs, signed_bitmessage_to_buf};
-use crate::rr::{Name, Record, RecordType};
+use crate::rr::{Name, RecordType};
 #[cfg(feature = "__dnssec")]
 use crate::serialize::binary::BinEncoder;
 
@@ -165,6 +169,7 @@ impl TSigResponseContext {
 }
 
 #[allow(missing_docs)] // TODO(@cpu): docs.
+#[cfg_attr(not(feature = "__dnssec"), expect(dead_code))]
 enum TsigResponseKind {
     Signed {
         signer: TSigner,

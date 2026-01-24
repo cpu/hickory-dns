@@ -30,6 +30,7 @@ use hickory_net::NetError;
 #[cfg(all(feature = "__dnssec", feature = "sqlite"))]
 use hickory_net::dnssec::DnssecDnsHandle;
 use hickory_net::{
+    DnsMultiplexer,
     client::{Client, ClientHandle},
     runtime::TokioRuntimeProvider,
     tcp::TcpClientStream,
@@ -711,7 +712,17 @@ async fn create_local_client(
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, dns_port.expect("no dns tcp port")));
 
     let (future, sender) = TcpClientStream::new(addr, None, None, TokioRuntimeProvider::new());
-    let (client, bg) = Client::new(future.await.expect("connection failed"), sender, signer);
+
+    let stream = future.await.expect("connection failed");
+
+    let (client, bg) = match signer {
+        None => Client::new(stream, sender),
+        Some(signer) => Client::from_sender(
+            DnsMultiplexer::with_timeout(stream, sender, Duration::from_secs(5))
+                .with_signer(signer),
+        ),
+    };
+
     tokio::spawn(bg);
     client
 }
