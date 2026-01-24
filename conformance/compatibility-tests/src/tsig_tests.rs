@@ -62,7 +62,7 @@ async fn test_create() {
     // material.
     let socket = SocketAddr::new(IpAddr::V4(ns.ipv4_addr()), 53);
     let sender = UdpClientStream::builder(socket, TokioRuntimeProvider::default())
-        .with_signer(Some(signer))
+        .with_signer(*signer)
         .build();
     let (mut client, driver) = Client::<TokioRuntimeProvider>::from_sender(sender);
     tokio::spawn(driver);
@@ -146,7 +146,7 @@ async fn test_tsig_zone_transfer() {
     let socket = SocketAddr::new(IpAddr::V4(ns.ipv4_addr()), 53);
     let (future, sender) =
         TcpClientStream::new(socket, None, None, TokioRuntimeProvider::default());
-    let multiplexer = DnsMultiplexer::new(future.await.unwrap(), sender, Some(signer));
+    let multiplexer = DnsMultiplexer::new(future.await.unwrap(), sender).with_signer(*signer);
 
     let (mut client, driver) = Client::<TokioRuntimeProvider>::from_sender(multiplexer);
     tokio::spawn(driver);

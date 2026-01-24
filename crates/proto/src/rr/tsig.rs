@@ -13,6 +13,7 @@
 //! - Truncated MACs are not supported.
 //! - Time checking is not performed in the TSIG implementation but by the caller.
 
+#[cfg(feature = "__dnssec")]
 use alloc::boxed::Box;
 #[cfg(feature = "__dnssec")]
 use alloc::string::ToString;
@@ -24,12 +25,13 @@ use core::ops::Range;
 #[cfg(feature = "__dnssec")]
 use tracing::debug;
 
+#[cfg(feature = "__dnssec")]
 use crate::error::ProtoError;
 #[cfg(feature = "__dnssec")]
 use crate::error::ProtoResult;
 #[cfg(feature = "__dnssec")]
 use crate::op::DnsResponse;
-use crate::op::{Message, OpCode, ResponseSigner};
+use crate::op::{Message, OpCode};
 use crate::rr::rdata::tsig::TsigError;
 use crate::rr::rdata::tsig::{TSIG, TsigAlgorithm};
 #[cfg(feature = "__dnssec")]
@@ -39,185 +41,142 @@ use crate::rr::{Name, Record, RecordType};
 use crate::serialize::binary::BinEncoder;
 
 /// Context for a TSIG response, used to construct a TSIG response signer
+#[cfg_attr(not(feature = "__dnssec"), expect(dead_code))]
 pub struct TSigResponseContext {
     request_id: u16,
     time: u64,
+    kind: TsigResponseKind,
 }
 
 impl TSigResponseContext {
     /// Create a new TSIG response context
-    pub fn new(request_id: u16, time: u64) -> Self {
-        Self { request_id, time }
-    }
-
-    /// Yield a response signer for a valid request signature
-    ///
-    /// `TsigError::BadSig` and `TSigError::BadKey` should not be provided
-    /// as an optional `error` - these conditions require an unsigned response.
-    /// Instead, use `bad_signature()` and `unknown_key()` for these error
-    /// conditions.
-    pub fn sign(
-        self,
-        req_sig: &TSIG,
-        error: Option<TsigError>,
+    pub fn new(
+        request_id: u16,
+        time: u64,
         signer: TSigner,
-    ) -> Box<dyn ResponseSigner> {
-        Box::new(TSigResponseSigner {
-            signer,
-            time: self.time,
-            error,
-            request_id: self.request_id,
-            request_mac: req_sig.mac().to_vec(),
-        })
-    }
-
-    /// Yield a response signer for a bad request signature
-    pub fn bad_signature(self, signer: TSigner) -> Box<dyn ResponseSigner> {
-        Box::new(BadSignatureSigner {
-            signer,
-            request_id: self.request_id,
-            time: self.time,
-        })
-    }
-
-    /// Yield a response signer for an unknown key
-    pub fn unknown_key(self, key_name: Name) -> Box<dyn ResponseSigner> {
-        Box::new(UnknownKeySigner {
-            time: self.time,
-            key_name,
-            request_id: self.request_id,
-        })
-    }
-}
-
-/// A TSIG response signer constructed in response to a specific request
-#[non_exhaustive]
-#[cfg_attr(not(feature = "__dnssec"), allow(dead_code))]
-struct TSigResponseSigner {
-    /// The validated MAC of the TSIG RR from the request
-    request_mac: Vec<u8>,
-    /// An optional error to include in the TSIG RR
-    error: Option<TsigError>,
-    /// A TSigner to use to produce a signature for signed TSIG RRs
-    signer: TSigner,
-    /// The ID of the authenticated request the response is in reply to
-    request_id: u16,
-    /// The time the request TSIG RR MAC was validated
-    time: u64,
-}
-
-impl ResponseSigner for TSigResponseSigner {
-    #[cfg(feature = "__dnssec")]
-    fn sign(self: Box<Self>, response: &[u8]) -> Result<Box<Record<TSIG>>, ProtoError> {
-        // BadSig and BadKey are both spec'd to return **unsigned** TSIG RRs.
-        debug_assert!(!matches!(
-            self.error,
-            Some(TsigError::BadSig | TsigError::BadKey)
-        ));
-
-        let mut stub_tsig = TSIG::stub(
-            self.request_id,
-            self.time,
-            self.signer.algorithm().clone(),
-            self.signer.fudge(),
-        );
-        if let Some(err) = self.error {
-            stub_tsig.set_error(err);
+        request_mac: Vec<u8>,
+        error: Option<TsigError>,
+    ) -> Self {
+        Self {
+            request_id,
+            time,
+            kind: TsigResponseKind::Signed {
+                signer,
+                request_mac,
+                error,
+            },
         }
-
-        let tbs_tsig_encoded =
-            self.signer
-                .encode_response_tbs(&self.request_mac, response, &stub_tsig)?;
-        let resp_tsig = stub_tsig.set_mac(
-            self.signer
-                .sign(&tbs_tsig_encoded)
-                .map_err(|e| ProtoError::from(e.to_string()))?,
-        );
-
-        Ok(Box::new(make_tsig_record(
-            self.signer.signer_name().clone(),
-            resp_tsig,
-        )))
     }
 
-    #[cfg(not(feature = "__dnssec"))]
-    fn sign(self: Box<Self>, _response: &[u8]) -> Result<Box<Record<TSIG>>, ProtoError> {
-        Err(ProtoError::from(
-            "TSIG signing requires the __dnssec feature",
-        ))
+    #[expect(missing_docs)] // TODO(@cpu): docs
+    pub fn unknown_key(request_id: u16, time: u64, key_name: Name) -> Self {
+        Self {
+            request_id,
+            time,
+            kind: TsigResponseKind::UnknownKey { key_name },
+        }
     }
-}
 
-#[cfg_attr(not(feature = "__dnssec"), allow(dead_code))]
-struct BadSignatureSigner {
-    signer: TSigner,
-    request_id: u16,
-    time: u64,
-}
+    #[expect(missing_docs)] // TODO(@cpu): docs
+    pub fn bad_signature(request_id: u16, time: u64, signer: TSigner) -> Self {
+        Self {
+            request_id,
+            time,
+            kind: TsigResponseKind::BadSignature { signer },
+        }
+    }
 
-impl ResponseSigner for BadSignatureSigner {
+    #[expect(missing_docs)] // TODO(@cpu): docs
     #[cfg(feature = "__dnssec")]
-    fn sign(self: Box<Self>, _: &[u8]) -> Result<Box<Record<TSIG>>, ProtoError> {
-        let mut stub_tsig = TSIG::stub(
-            self.request_id,
-            self.time,
-            self.signer.algorithm().clone(),
-            self.signer.fudge(),
-        );
-        stub_tsig.set_error(TsigError::BadSig);
-        Ok(Box::new(make_tsig_record(
-            self.signer.signer_name().clone(),
-            stub_tsig,
-        )))
-    }
+    pub fn sign(self, response: &[u8]) -> Result<Box<Record<TSIG>>, ProtoError> {
+        match self.kind {
+            TsigResponseKind::Signed {
+                signer,
+                request_mac,
+                error,
+            } => {
+                // BadSig and BadKey are both spec'd to return **unsigned** TSIG RRs.
+                debug_assert!(!matches!(
+                    error,
+                    Some(TsigError::BadSig | TsigError::BadKey)
+                ));
 
-    #[cfg(not(feature = "__dnssec"))]
-    fn sign(self: Box<Self>, _response: &[u8]) -> Result<Box<Record<TSIG>>, ProtoError> {
-        Err(ProtoError::from(
-            "TSIG signing requires the __dnssec feature",
-        ))
+                let mut stub_tsig = TSIG::stub(
+                    self.request_id,
+                    self.time,
+                    signer.algorithm().clone(),
+                    signer.fudge(),
+                );
+                if let Some(err) = error {
+                    stub_tsig.set_error(err);
+                }
+
+                let tbs_tsig_encoded =
+                    signer.encode_response_tbs(&request_mac, response, &stub_tsig)?;
+                let resp_tsig = stub_tsig.set_mac(
+                    signer
+                        .sign(&tbs_tsig_encoded)
+                        .map_err(|e| ProtoError::from(e.to_string()))?,
+                );
+
+                Ok(Box::new(make_tsig_record(
+                    signer.signer_name().clone(),
+                    resp_tsig,
+                )))
+            }
+            TsigResponseKind::BadSignature { signer } => {
+                let mut stub_tsig = TSIG::stub(
+                    self.request_id,
+                    self.time,
+                    signer.algorithm().clone(),
+                    signer.fudge(),
+                );
+                stub_tsig.set_error(TsigError::BadSig);
+                Ok(Box::new(make_tsig_record(
+                    signer.signer_name().clone(),
+                    stub_tsig,
+                )))
+            }
+            TsigResponseKind::UnknownKey { key_name } => {
+                // "If a non-forwarding server does not recognize the key or algorithm used by the
+                // client (or recognizes the algorithm but does not implement it), the server MUST
+                // generate an error response with RCODE 9 (NOTAUTH) and TSIG ERROR 17 (BADKEY).
+                // This response MUST be unsigned"
+                //
+                // Note that this doesn't specify what TSIG algorithm, fudge, or key name we
+                // should use in the response since we didn't recognize the key name as one
+                // of our configured signers. We choose a stand-in algorithm and reflect the
+                // unknown key name in absence of further direction.
+                Ok(Box::new(make_tsig_record(
+                    key_name.clone(),
+                    TSIG::new(
+                        TsigAlgorithm::HmacSha256,
+                        self.time,
+                        300,
+                        Vec::new(),
+                        self.request_id,
+                        Some(TsigError::BadKey),
+                        Vec::new(),
+                    ),
+                )))
+            }
+        }
     }
 }
 
-#[cfg_attr(not(feature = "__dnssec"), allow(dead_code))]
-struct UnknownKeySigner {
-    time: u64,
-    key_name: Name,
-    request_id: u16,
-}
-
-impl ResponseSigner for UnknownKeySigner {
-    #[cfg(feature = "__dnssec")]
-    fn sign(self: Box<Self>, _: &[u8]) -> Result<Box<Record<TSIG>>, ProtoError> {
-        // "If a non-forwarding server does not recognize the key or algorithm used by the
-        // client (or recognizes the algorithm but does not implement it), the server MUST
-        // generate an error response with RCODE 9 (NOTAUTH) and TSIG ERROR 17 (BADKEY).
-        // This response MUST be unsigned"
-        //
-        // Note that this doesn't specify what TSIG algorithm, fudge, or key name we
-        // should use in the response since we didn't recognize the key name as one
-        // of our configured signers. We choose a stand-in algorithm and reflect the
-        // unknown key name in absence of further direction.
-        Ok(Box::new(make_tsig_record(
-            self.key_name.clone(),
-            TSIG::new(
-                TsigAlgorithm::HmacSha256,
-                self.time,
-                300,
-                Vec::new(),
-                self.request_id,
-                Some(TsigError::BadKey),
-                Vec::new(),
-            ),
-        )))
-    }
-
-    #[cfg(not(feature = "__dnssec"))]
-    fn sign(self: Box<Self>, _response: &[u8]) -> Result<Box<Record<TSIG>>, ProtoError> {
-        Err(ProtoError::from(
-            "TSIG signing requires the __dnssec feature",
-        ))
-    }
+#[allow(missing_docs)] // TODO(@cpu): docs.
+enum TsigResponseKind {
+    Signed {
+        signer: TSigner,
+        request_mac: Vec<u8>,
+        error: Option<TsigError>,
+    },
+    BadSignature {
+        signer: TSigner,
+    },
+    UnknownKey {
+        key_name: Name,
+    },
 }
 
 /// A concrete verifier for TSIG-signed DNS responses.

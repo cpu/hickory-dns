@@ -37,7 +37,7 @@ use crate::{
             DnsRequest, DnsRequestOptions, DnsResponse, Edns, Message, OpCode, Query,
             update_message,
         },
-        rr::{DNSClass, Name, RData, Record, RecordSet, RecordType, rdata::SOA, tsig::TSigner},
+        rr::{DNSClass, Name, RData, Record, RecordSet, RecordType, rdata::SOA},
     },
     runtime::RuntimeProvider,
     xfer::{
@@ -81,9 +81,8 @@ impl<P: RuntimeProvider> Client<P> {
     pub fn new<S: DnsClientStream>(
         stream: S,
         stream_handle: BufDnsStreamHandle,
-        signer: Option<TSigner>,
     ) -> (Self, DnsExchangeBackground<DnsMultiplexer<S>, P::Timer>) {
-        Self::with_timeout(stream, stream_handle, Duration::from_secs(5), signer)
+        Self::with_timeout(stream, stream_handle, Duration::from_secs(5))
     }
 
     /// Spawns a new Client Stream.
@@ -100,13 +99,11 @@ impl<P: RuntimeProvider> Client<P> {
         stream: S,
         stream_handle: BufDnsStreamHandle,
         timeout_duration: Duration,
-        signer: Option<TSigner>,
     ) -> (Self, DnsExchangeBackground<DnsMultiplexer<S>, P::Timer>) {
         Self::from_sender(DnsMultiplexer::with_timeout(
             stream,
             stream_handle,
             timeout_duration,
-            signer,
         ))
     }
 

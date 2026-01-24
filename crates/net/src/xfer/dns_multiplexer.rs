@@ -94,6 +94,7 @@ pub struct DnsMultiplexer<S> {
     timeout_duration: Duration,
     stream_handle: BufDnsStreamHandle,
     active_requests: HashMap<u16, ActiveRequest>,
+    #[cfg(feature = "__dnssec")]
     signer: Option<TSigner>,
     is_shutdown: bool,
 }
@@ -107,8 +108,15 @@ impl<S: DnsClientStream> DnsMultiplexer<S> {
     ///   (see TcpClientStream or UdpClientStream)
     /// * `stream_handle` - The handle for the `stream` on which bytes can be sent/received.
     /// * `signer` - An optional signer for requests, needed for Updates with TSIG, otherwise not needed
-    pub fn new(stream: S, stream_handle: BufDnsStreamHandle, signer: Option<TSigner>) -> Self {
-        Self::with_timeout(stream, stream_handle, Duration::from_secs(5), signer)
+    pub fn new(stream: S, stream_handle: BufDnsStreamHandle) -> Self {
+        Self::with_timeout(stream, stream_handle, Duration::from_secs(5))
+    }
+
+    #[expect(missing_docs)] // TODO(@cpu): docs
+    #[cfg(feature = "__dnssec")]
+    pub fn with_signer(mut self, signer: TSigner) -> Self {
+        self.signer = Some(signer);
+        self
     }
 
     /// Spawns a new DnsMultiplexer Stream.
@@ -125,14 +133,14 @@ impl<S: DnsClientStream> DnsMultiplexer<S> {
         stream: S,
         stream_handle: BufDnsStreamHandle,
         timeout_duration: Duration,
-        signer: Option<TSigner>,
     ) -> Self {
         Self {
             stream,
             timeout_duration,
             stream_handle,
             active_requests: HashMap::default(),
-            signer,
+            #[cfg(feature = "__dnssec")]
+            signer: None,
             is_shutdown: false,
         }
     }
@@ -247,14 +255,12 @@ impl<S: DnsClientStream> DnsRequestSender for DnsMultiplexer<S> {
         let (mut request, _) = request.into_parts();
         request.set_id(query_id);
 
-        let now = S::Time::current_time();
-
         #[cfg(feature = "__dnssec")]
         let mut verifier = None;
         #[cfg(feature = "__dnssec")]
         if let Some(signer) = &self.signer {
             if signer.should_sign_message(&request) {
-                match request.finalize(signer, now) {
+                match request.finalize(signer, S::Time::current_time()) {
                     Ok(answer_verifier) => verifier = answer_verifier,
                     Err(e) => {
                         debug!("could not sign message: {}", e);

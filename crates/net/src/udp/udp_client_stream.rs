@@ -20,6 +20,7 @@ use crate::udp::MAX_RECEIVE_BUFFER_SIZE;
 use crate::udp::udp_stream::NextRandomUdpSocket;
 use crate::xfer::{DnsExchange, DnsRequestSender, DnsResponseStream};
 use futures_util::{FutureExt, Stream, StreamExt, pin_mut, stream::FuturesUnordered};
+#[cfg(feature = "__dnssec")]
 use hickory_proto::rr::tsig::TSigner;
 use tracing::{debug, trace, warn};
 
@@ -33,6 +34,7 @@ pub struct UdpClientStream<P> {
     name_server: SocketAddr,
     timeout: Duration,
     is_shutdown: bool,
+    #[cfg(feature = "__dnssec")]
     signer: Option<TSigner>,
     bind_addr: Option<SocketAddr>,
     avoid_local_ports: Arc<HashSet<u16>>,
@@ -48,6 +50,7 @@ impl<P: RuntimeProvider> UdpClientStream<P> {
         UdpClientStreamBuilder {
             name_server,
             timeout: None,
+            #[cfg(feature = "__dnssec")]
             signer: None,
             bind_addr: None,
             avoid_local_ports: Arc::default(),
@@ -119,7 +122,9 @@ struct UdpRequest<P> {
     name_server: SocketAddr,
     request: DnsRequest,
     provider: P,
+    #[cfg(feature = "__dnssec")]
     signer: Option<TSigner>,
+    #[cfg(feature = "__dnssec")]
     now: u64,
     bind_addr: Option<SocketAddr>,
     os_port_selection: bool,
@@ -134,13 +139,14 @@ impl<P: RuntimeProvider> UdpRequest<P> {
             recv_buf_size: MAX_RECEIVE_BUFFER_SIZE.min(request.max_payload() as usize),
             case_randomization: request.options().case_randomization,
             name_server: stream.name_server,
-            // Only smuggle in the signer if we are going to use it.
+            #[cfg(feature = "__dnssec")]
             signer: match &stream.signer {
                 Some(signer) if signer.should_sign_message(&request) => stream.signer.clone(),
                 _ => None,
             },
             request,
             provider: stream.provider.clone(),
+            #[cfg(feature = "__dnssec")]
             now: P::Timer::current_time(),
             bind_addr: stream.bind_addr,
             os_port_selection: stream.os_port_selection,
@@ -151,6 +157,7 @@ impl<P: RuntimeProvider> UdpRequest<P> {
 impl<P: RuntimeProvider> Request for UdpRequest<P> {
     async fn send(&self) -> Result<DnsResponse, NetError> {
         let original_query = self.request.original_query();
+        #[cfg_attr(not(feature = "__dnssec"), expect(unused_mut))]
         let mut request = self.request.clone();
 
         #[cfg(feature = "__dnssec")]
@@ -336,6 +343,7 @@ impl<P: RuntimeProvider> Request for UdpRequest<P> {
 pub struct UdpClientStreamBuilder<P> {
     name_server: SocketAddr,
     timeout: Option<Duration>,
+    #[cfg(feature = "__dnssec")]
     signer: Option<TSigner>,
     bind_addr: Option<SocketAddr>,
     avoid_local_ports: Arc<HashSet<u16>>,
@@ -352,12 +360,20 @@ impl<P: RuntimeProvider> UdpClientStreamBuilder<P> {
         self
     }
 
-    /// Sets the message finalizer to be applied to queries.
-    pub fn with_signer(self, signer: Option<TSigner>) -> Self {
+    #[expect(missing_docs)] // TODO(@cpu): docs
+    #[cfg(feature = "__dnssec")]
+    pub fn with_signer(mut self, signer: TSigner) -> Self {
+        self.signer = Some(signer);
+        self
+    }
+
+    #[expect(missing_docs)] // TODO(@cpu): docs
+    pub fn new(self) -> Self {
         Self {
             name_server: self.name_server,
             timeout: self.timeout,
-            signer,
+            #[cfg(feature = "__dnssec")]
+            signer: None,
             bind_addr: self.bind_addr,
             avoid_local_ports: self.avoid_local_ports,
             os_port_selection: self.os_port_selection,
@@ -418,6 +434,7 @@ impl<P: RuntimeProvider> UdpClientStreamBuilder<P> {
             name_server: self.name_server,
             timeout: self.timeout.unwrap_or(Duration::from_secs(5)),
             is_shutdown: false,
+            #[cfg(feature = "__dnssec")]
             signer: self.signer,
             bind_addr: self.bind_addr,
             avoid_local_ports: self.avoid_local_ports.clone(),

@@ -20,6 +20,7 @@ use tracing::warn;
 use crate::dnssec::{DnssecIter, rdata::DNSSECRData};
 #[cfg(any(feature = "std", feature = "no-std-rand"))]
 use crate::random;
+#[cfg(feature = "__dnssec")]
 use crate::rr::tsig::TSigner;
 use crate::{
     error::{ProtoError, ProtoResult},
@@ -776,23 +777,6 @@ impl Message {
         Ok(verifier)
     }
 
-    /// Finalize the message prior to sending (without __dnssec feature).
-    ///
-    /// Returns an error indicating that TSIG signing requires the __dnssec feature.
-    /// This method exists to allow code to compile without the __dnssec feature,
-    /// but will always fail at runtime if called (which should never happen since
-    /// TSigner can only be constructed with the __dnssec feature enabled).
-    #[cfg(not(feature = "__dnssec"))]
-    pub fn finalize(
-        &mut self,
-        _finalizer: &TSigner,
-        _inception_time: u64,
-    ) -> ProtoResult<Option<crate::rr::tsig::TsigVerifier>> {
-        Err(ProtoError::from(
-            "TSIG signing requires the __dnssec feature",
-        ))
-    }
-
     /// Consumes `Message` and returns into components
     pub fn into_parts(self) -> MessageParts {
         self.into()
@@ -915,12 +899,6 @@ fn update_header_counts(
         .set_truncated(is_truncated);
 
     header
-}
-
-/// A trait for producing a `MessageSignature` for responses
-pub trait ResponseSigner: Send + Sync {
-    /// sign produces a `MessageSignature` for the provided encoded, unsigned, response message.
-    fn sign(self: Box<Self>, response: &[u8]) -> Result<Box<Record<TSIG>>, ProtoError>;
 }
 
 /// Returns the count written and a boolean if it was truncated

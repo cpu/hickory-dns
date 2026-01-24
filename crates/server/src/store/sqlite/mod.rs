@@ -29,7 +29,7 @@ use crate::{
 use crate::{
     net::runtime::{RuntimeProvider, TokioRuntimeProvider},
     proto::{
-        op::{ResponseCode, ResponseSigner},
+        op::ResponseCode,
         rr::{DNSClass, LowerName, Name, RData, Record, RecordSet, RecordType, RrKey},
     },
     server::{Request, RequestInfo},
@@ -529,7 +529,7 @@ impl<P: RuntimeProvider + Send + Sync> SqliteZoneHandler<P> {
         &self,
         request: &Request,
         now: u64,
-    ) -> (Result<(), ResponseCode>, Option<Box<dyn ResponseSigner>>) {
+    ) -> (Result<(), ResponseCode>, Option<TSigResponseContext>) {
         // 3.3.3 - Pseudocode for Permission Checking
         //
         //      if (security policy exists)
@@ -562,7 +562,7 @@ impl<P: RuntimeProvider + Send + Sync> SqliteZoneHandler<P> {
         &self,
         _request: &Request,
         _now: u64,
-    ) -> (Result<(), ResponseCode>, Option<Box<dyn ResponseSigner>>) {
+    ) -> (Result<(), ResponseCode>, Option<TSigResponseContext>) {
         match self.axfr_policy {
             // Deny without checking any signatures.
             AxfrPolicy::Deny => (Err(ResponseCode::Refused), None),
@@ -936,9 +936,8 @@ impl<P: RuntimeProvider + Send + Sync> SqliteZoneHandler<P> {
         tsig: &Record<TSIG>,
         request: &Request,
         now: u64,
-    ) -> (Result<(), ResponseCode>, Box<dyn ResponseSigner>) {
+    ) -> (Result<(), ResponseCode>, TSigResponseContext) {
         let req_id = request.header().id();
-        let cx = TSigResponseContext::new(req_id, now);
 
         debug!("authorizing with: {tsig:?}");
         // RFC 8945 Section 5.5: "To prevent cross-algorithm attacks, there SHOULD only be
@@ -952,7 +951,7 @@ impl<P: RuntimeProvider + Send + Sync> SqliteZoneHandler<P> {
             warn!("no TSIG key name matched: id {req_id}");
             return (
                 Err(ResponseCode::NotAuth),
-                cx.unknown_key(tsig.name().clone()),
+                TSigResponseContext::unknown_key(req_id, now, tsig.name().clone()),
             );
         };
 
@@ -960,7 +959,7 @@ impl<P: RuntimeProvider + Send + Sync> SqliteZoneHandler<P> {
             warn!("invalid TSIG signature: id {req_id}");
             return (
                 Err(ResponseCode::NotAuth),
-                cx.bad_signature(tsigner.clone()),
+                TSigResponseContext::bad_signature(req_id, now, tsigner.clone()),
             );
         };
 
@@ -974,7 +973,16 @@ impl<P: RuntimeProvider + Send + Sync> SqliteZoneHandler<P> {
             error = Some(TsigError::BadTime);
         }
 
-        (response, cx.sign(tsig.data(), error, tsigner.clone()))
+        (
+            response,
+            TSigResponseContext::new(
+                req_id,
+                now,
+                tsigner.clone(),
+                tsig.data().mac().to_vec(),
+                error,
+            ),
+        )
     }
 }
 
@@ -1023,7 +1031,7 @@ impl<P: RuntimeProvider + Send + Sync> ZoneHandler for SqliteZoneHandler<P> {
         &self,
         _request: &Request,
         _now: u64,
-    ) -> (Result<bool, ResponseCode>, Option<Box<dyn ResponseSigner>>) {
+    ) -> (Result<bool, ResponseCode>, Option<TSigResponseContext>) {
         #[cfg(feature = "__dnssec")]
         {
             // the spec says to authorize after prereqs, seems better to auth first.
@@ -1085,10 +1093,7 @@ impl<P: RuntimeProvider + Send + Sync> ZoneHandler for SqliteZoneHandler<P> {
         &self,
         request: &Request,
         lookup_options: LookupOptions,
-    ) -> (
-        LookupControlFlow<AuthLookup>,
-        Option<Box<dyn ResponseSigner>>,
-    ) {
+    ) -> (LookupControlFlow<AuthLookup>, Option<TSigResponseContext>) {
         let request_info = match request.request_info() {
             Ok(info) => info,
             Err(e) => return (LookupControlFlow::Break(Err(e)), None),
@@ -1115,7 +1120,7 @@ impl<P: RuntimeProvider + Send + Sync> ZoneHandler for SqliteZoneHandler<P> {
         now: u64,
     ) -> Option<(
         Result<ZoneTransfer, LookupError>,
-        Option<Box<dyn ResponseSigner>>,
+        Option<TSigResponseContext>,
     )> {
         let (resp, signer) = self.authorize_axfr(request, now).await;
         if let Err(code) = resp {
