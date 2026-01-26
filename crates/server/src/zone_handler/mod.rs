@@ -20,12 +20,13 @@ use crate::proto::dnssec::{DnsSecResult, DnssecSigner, Nsec3HashAlgorithm};
 use crate::proto::op::{Edns, ResponseCode};
 #[cfg(feature = "__dnssec")]
 use crate::proto::rr::Name;
-use crate::proto::rr::{LowerName, Record, RecordSet, RecordType, RrsetRecords, rdata::SOA};
+use crate::proto::rr::{
+    LowerName, Record, RecordSet, RecordType, RrsetRecords, rdata::SOA, tsig::TSigResponseContext,
+};
 #[cfg(feature = "recursor")]
 use crate::resolver::recursor::RecursorError;
 use crate::server::{Request, RequestInfo};
 use cfg_if::cfg_if;
-use hickory_proto::dnssec::TSigResponseContext;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 

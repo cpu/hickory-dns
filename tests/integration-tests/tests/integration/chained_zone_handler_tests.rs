@@ -5,10 +5,11 @@ use hickory_net::{
     runtime::{Time, TokioTime},
     xfer::Protocol,
 };
-use hickory_proto::dnssec::TSigResponseContext;
 use hickory_proto::{
     op::{Message, MessageType, Query, ResponseCode},
-    rr::{LowerName, Name, RData, Record, RecordSet, RecordType, rdata::A},
+    rr::{
+        LowerName, Name, RData, Record, RecordSet, RecordType, rdata::A, tsig::TSigResponseContext,
+    },
     serialize::binary::BinEncodable,
 };
 #[cfg(feature = "__dnssec")]

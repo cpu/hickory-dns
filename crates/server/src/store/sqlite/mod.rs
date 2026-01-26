@@ -23,14 +23,18 @@ use crate::metrics::PersistentStoreMetrics;
 #[cfg(feature = "__dnssec")]
 use crate::{
     dnssec::NxProofKind,
-    proto::dnssec::{DnsSecResult, DnssecSigner, TSigResponseContext, TSigner},
+    proto::dnssec::{DnsSecResult, DnssecSigner},
+    proto::rr::tsig::TSigner,
     zone_handler::{DnssecZoneHandler, Nsec3QueryInfo, UpdateRequest},
 };
 use crate::{
     net::runtime::{RuntimeProvider, TokioRuntimeProvider},
     proto::{
         op::ResponseCode,
-        rr::{DNSClass, LowerName, Name, RData, Record, RecordSet, RecordType, RrKey},
+        rr::{
+            DNSClass, LowerName, Name, RData, Record, RecordSet, RecordType, RrKey,
+            tsig::TSigResponseContext,
+        },
     },
     server::{Request, RequestInfo},
     store::{

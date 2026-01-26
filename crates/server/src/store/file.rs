@@ -21,7 +21,7 @@ use crate::{
     zone_handler::{DnssecZoneHandler, Nsec3QueryInfo},
 };
 use crate::{
-    proto::rr::{LowerName, Name, RecordType},
+    proto::rr::{LowerName, Name, RecordType, tsig::TSigResponseContext},
     server::{Request, RequestInfo},
     store::in_memory::{InMemoryZoneHandler, zone_from_path},
     zone_handler::{
@@ -29,7 +29,6 @@ use crate::{
         ZoneTransfer, ZoneType,
     },
 };
-use hickory_proto::dnssec::TSigResponseContext;
 use serde::Deserialize;
 
 /// FileZoneHandler is responsible for storing the resource records for a particular zone.

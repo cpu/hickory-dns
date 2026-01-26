@@ -17,7 +17,7 @@ use std::sync::Arc;
 use crate::{dnssec::NxProofKind, proto::dnssec::TrustAnchors, zone_handler::Nsec3QueryInfo};
 use crate::{
     net::runtime::TokioRuntimeProvider,
-    proto::rr::{LowerName, Name, RecordType},
+    proto::rr::{LowerName, Name, RecordType, tsig::TSigResponseContext},
     resolver::{
         ConnectionProvider, Resolver,
         config::{NameServerConfig, ResolveHosts, ResolverConfig, ResolverOpts},
@@ -28,7 +28,6 @@ use crate::{
         ZoneType,
     },
 };
-use hickory_proto::dnssec::TSigResponseContext;
 use serde::Deserialize;
 use tracing::{debug, info};
 

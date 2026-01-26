@@ -30,7 +30,10 @@ use crate::{
     net::runtime::{RuntimeProvider, TokioRuntimeProvider},
     proto::{
         op::ResponseCode,
-        rr::{DNSClass, LowerName, Name, RData, Record, RecordSet, RecordType, RrKey},
+        rr::{
+            DNSClass, LowerName, Name, RData, Record, RecordSet, RecordType, RrKey,
+            tsig::TSigResponseContext,
+        },
         serialize::txt::Parser,
     },
     server::{Request, RequestInfo},
@@ -39,7 +42,6 @@ use crate::{
         LookupRecords, ZoneHandler, ZoneTransfer, ZoneType,
     },
 };
-use hickory_proto::dnssec::TSigResponseContext;
 #[cfg(feature = "__dnssec")]
 use time::OffsetDateTime;
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};

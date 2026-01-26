@@ -415,7 +415,18 @@ pub(crate) use ring_impl as ring_like;
 #[cfg(feature = "dnssec-aws-lc-rs")]
 #[cfg_attr(feature = "dnssec-ring", allow(unused_imports))]
 pub(crate) mod aws_lc_rs_impl {
-    pub(crate) use aws_lc_rs::signature::KeyPair;
+    pub(crate) use aws_lc_rs::{
+        digest,
+        error::{KeyRejected, Unspecified},
+        hmac,
+        rand::SystemRandom,
+        rsa::PublicKeyComponents,
+        signature::{
+            self, ECDSA_P256_SHA256_FIXED_SIGNING, ECDSA_P384_SHA384_FIXED_SIGNING,
+            ED25519_PUBLIC_KEY_LEN, EcdsaKeyPair, Ed25519KeyPair, KeyPair, RSA_PKCS1_SHA256,
+            RSA_PKCS1_SHA512, RsaKeyPair,
+        },
+    };
 }
 
 #[cfg(feature = "dnssec-ring")]
