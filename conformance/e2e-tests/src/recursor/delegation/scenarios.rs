@@ -131,11 +131,7 @@ fn skipped_intermediate_zone_cut() -> Result<(), Error> {
         &network,
     )?;
 
-    root_ns.referral(
-        FQDN::TEST_TLD,
-        FQDN("ns.testing.")?,
-        tld_ns.ipv4_addr(),
-    );
+    root_ns.referral(FQDN::TEST_TLD, FQDN("ns.testing.")?, tld_ns.ipv4_addr());
 
     let root_hint: Root = root_ns.root_hint();
 
