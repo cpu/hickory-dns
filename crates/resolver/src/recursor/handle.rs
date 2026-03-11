@@ -527,11 +527,17 @@ impl<P: ConnectionProvider> RecursorDnsHandle<P> {
 
             let response = match lookup_res {
                 Ok(response) => response,
-                // Short-circuit on NXDOMAIN, per RFC 8020.
-                Err(e) if e.is_nx_domain() => return Err(e),
                 // Short-circuit on timeouts. Requesting a longer name from the same pool would likely
                 // encounter them again.
                 Err(e) if e.is_timeout() => return Err(e),
+                // NXDOMAIN for an NS query means "no zone cut here", not necessarily "this name
+                // doesn't exist". The parent zone may serve subdomains directly without a
+                // delegation (e.g., `br.` serving `opresente.com.br.` without a `com.br.` zone
+                // cut). RFC 8020 is applied later when doing the actual record lookup.
+                Err(e) if e.is_nx_domain() => {
+                    trace!(?zone, "NXDOMAIN for NS query, no zone cut at zone");
+                    continue;
+                }
                 // The name `zone` is not a zone cut. Return the same pool of name servers again, but do
                 // not cache it. If this was recursively called by `ns_pool_for_name()`, the outer call
                 // will try again with one more label added to the iterative query name.
