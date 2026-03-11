@@ -102,6 +102,87 @@ fn parent_ns_in_authority_does_not_prevent_resolution() -> Result<(), Error> {
     Ok(())
 }
 
+/// Skipped intermediate zone cut
+///
+/// This test reproduces a bug where the recursor incorrectly returns NXDOMAIN when a
+/// parent zone delegates directly to a subdomain without an intermediate zone cut.
+///
+/// Zone structure:
+/// - `testing.` is the TLD zone served by an authoritative server
+/// - `target.example.testing.` has an A record (192.0.2.1)
+/// - There is NO zone cut at `example.testing.` (NS query returns NXDOMAIN)
+///
+/// The bug: When the recursor queries `example.testing. NS` and receives NXDOMAIN,
+/// it incorrectly applies RFC 8020 (NXDOMAIN means nothing underneath) and short-circuits.
+/// But NXDOMAIN for an NS query means "no zone cut here", not "this domain doesn't exist".
+/// The recursor should continue to try querying for the actual target record.
+#[test]
+fn skipped_intermediate_zone_cut() -> Result<(), Error> {
+    let target_fqdn = FQDN("target.example.testing.")?;
+    let target_ipv4 = Ipv4Addr::new(192, 0, 2, 1);
+
+    let network = Network::new()?;
+
+    let mut root_ns = NameServer::new(&Implementation::test_peer(), FQDN::ROOT, &network)?;
+
+    let tld_ns = NameServer::new(
+        &Implementation::test_server("skip_intermediate_zone", "udp"),
+        FQDN::TEST_TLD,
+        &network,
+    )?;
+
+    root_ns.referral(
+        FQDN::TEST_TLD,
+        FQDN("ns.testing.")?,
+        tld_ns.ipv4_addr(),
+    );
+
+    let root_hint: Root = root_ns.root_hint();
+
+    let resolver =
+        Resolver::new(&network, root_hint).start_with_subject(&Implementation::hickory())?;
+
+    let client = Client::new(resolver.network())?;
+
+    let _root_ns = root_ns.start()?;
+    let _tld_ns = tld_ns.start()?;
+
+    thread::sleep(Duration::from_secs(2));
+
+    let dig_settings = *DigSettings::default().recurse();
+    let res = client.dig(
+        dig_settings,
+        resolver.ipv4_addr(),
+        RecordType::A,
+        &target_fqdn,
+    )?;
+
+    assert!(
+        res.status.is_noerror(),
+        "expected NOERROR, got {:?}",
+        res.status
+    );
+    let a_records: Vec<_> = res
+        .answer
+        .iter()
+        .filter_map(|r| {
+            if let Record::A(rec) = r {
+                Some(rec)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(
+        a_records.len(),
+        1,
+        "expected exactly one A record in answer"
+    );
+    assert_eq!(a_records[0].ipv4_addr, target_ipv4);
+
+    Ok(())
+}
+
 /// Recursive Delegation
 ///
 /// This test simulates a potentially infinite recursive delegation for the zone example.testing.

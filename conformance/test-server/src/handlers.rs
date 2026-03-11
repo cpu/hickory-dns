@@ -573,6 +573,84 @@ pub(crate) fn parent_ns_in_authority_handler(
         .with_context(|| "parent_ns_in_authority handler: could not serialize Message")
 }
 
+/// This handler simulates an authoritative server where a parent zone delegates
+/// directly to a deep subdomain without an intermediate zone cut.
+///
+/// Zone structure (simulating br. -> opresente.com.br. without com.br. zone cut):
+/// - `testing.` is the TLD zone
+/// - `target.example.testing.` has an A record
+/// - There is NO zone cut at `example.testing.` (NS query returns NXDOMAIN)
+///
+/// This reproduces a bug where the recursor incorrectly short-circuits on
+/// NXDOMAIN for an intermediate NS query (RFC 8020 misapplication). The recursor
+/// queries `example.testing. NS`, gets NXDOMAIN, and concludes the entire
+/// subtree doesn't exist. But NXDOMAIN for an NS query means "no zone cut here",
+/// not "this domain doesn't exist".
+pub(crate) fn skip_intermediate_zone_handler(
+    bytes: &[u8],
+    _transport: Transport,
+) -> Result<Option<Vec<u8>>> {
+    let mut msg = Message::from_vec(bytes)?.to_response();
+    let name = msg.queries()[0].name().clone();
+    let q_type = msg.queries()[0].query_type();
+
+    let tld = Name::from_ascii("testing.")?;
+    let intermediate = Name::from_ascii("example.testing.")?;
+    let target = Name::from_ascii("target.example.testing.")?;
+    let ns_name = Name::from_ascii("ns.testing.")?;
+
+    msg.set_authoritative(true).set_recursion_desired(false);
+
+    if q_type == RecordType::NS && name == tld {
+        msg.add_answer(Record::from_rdata(
+            tld.clone(),
+            86400,
+            RData::NS(rdata::NS(ns_name)),
+        ));
+    } else if q_type == RecordType::NS && name == intermediate {
+        msg.set_response_code(ResponseCode::NXDomain);
+        msg.add_authority(Record::from_rdata(
+            tld,
+            300,
+            RData::SOA(rdata::SOA::new(
+                Name::from_ascii("ns.testing.")?,
+                Name::from_ascii("hostmaster.testing.")?,
+                2026030501,
+                3600,
+                900,
+                604800,
+                300,
+            )),
+        ));
+    } else if q_type == RecordType::A && name == target {
+        msg.add_answer(Record::from_rdata(
+            target,
+            300,
+            RData::A(rdata::A([192, 0, 2, 1].into())),
+        ));
+    } else if q_type == RecordType::NS && tld.zone_of(&name) {
+    } else {
+        msg.set_response_code(ResponseCode::NXDomain);
+        msg.add_authority(Record::from_rdata(
+            tld,
+            300,
+            RData::SOA(rdata::SOA::new(
+                Name::from_ascii("ns.testing.")?,
+                Name::from_ascii("hostmaster.testing.")?,
+                2026030501,
+                3600,
+                900,
+                604800,
+                300,
+            )),
+        ));
+    }
+
+    msg.to_vec()
+        .map(Some)
+        .with_context(|| "skip_intermediate_zone handler: could not serialize Message")
+}
+
 static TRUNCATED_TCP_COUNTER: AtomicU8 = AtomicU8::new(0);
 static TRUNCATED_UDP_COUNTER: AtomicU8 = AtomicU8::new(0);
 static PACKET_LOSS_MARKER: AtomicBool = AtomicBool::new(false);

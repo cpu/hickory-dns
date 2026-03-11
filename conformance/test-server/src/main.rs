@@ -26,6 +26,7 @@ async fn main() -> Result<()> {
         "nsec3_nocover" => handlers::nsec3_nocover_handler,
         "parent_ns_in_authority" => handlers::parent_ns_in_authority_handler,
         "packet_loss" => handlers::packet_loss_handler,
+        "skip_intermediate_zone" => handlers::skip_intermediate_zone_handler,
         "truncated_response" => handlers::truncated_response_handler,
         _ => {
             return Err(anyhow::Error::msg("unknown handler"));
