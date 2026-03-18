@@ -23,6 +23,7 @@ use std::{fs, io};
 use ipnet::IpNet;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 #[cfg(all(
     feature = "toml",
     feature = "serde",
@@ -601,6 +602,11 @@ pub struct ResolverOpts {
 impl ResolverOpts {
     pub(crate) fn answer_address_filter(&self) -> Option<AccessControlSet> {
         if self.deny_answers.is_empty() {
+            if !self.allow_answers.is_empty() {
+                warn!(
+                    "allow_answers is configured but deny_answers is empty; allow_answers only overrides deny_answers and has no effect on its own"
+                );
+            }
             return None;
         }
 
