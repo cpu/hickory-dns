@@ -3,7 +3,7 @@ use core::net::IpAddr;
 
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
 use prefix_trie::PrefixSet;
-use tracing::debug;
+use tracing::{debug, warn};
 
 /// An IPv4/IPv6 access control set.
 ///
@@ -126,6 +126,14 @@ impl<'a> AccessControlSetBuilder {
 
     /// Build the `AccessControlSet`.
     pub fn build(self) -> AccessControlSet {
+        let allow_empty = self.0.v4_allow.is_empty() && self.0.v6_allow.is_empty();
+        let deny_empty = self.0.v4_deny.is_empty() && self.0.v6_deny.is_empty();
+        if !allow_empty && deny_empty {
+            warn!(
+                name = self.0.name,
+                "allow list is configured but deny list is empty; allow list only overrides deny list and has no effect on its own"
+            );
+        }
         self.0
     }
 }
